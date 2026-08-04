@@ -26,6 +26,7 @@
   const goEl = document.getElementById('go');
   const layerEl = document.getElementById('layer');
   const buildingsEl = document.getElementById('buildings');
+  const labelsEl = document.getElementById('labels');
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
   let vworldKey = '';
@@ -232,12 +233,54 @@
     return { type: 'FeatureCollection', features };
   }
 
+  /** 이름이 붙은 지점을 뽑는다. 건물 이름은 중심점에 놓는다. */
+  function toLabels(elements, center, limit) {
+    const seen = new Set();
+    const labels = [];
+    for (const el of elements) {
+      const name = el.tags && el.tags.name;
+      if (!name || seen.has(name)) continue;
+
+      let lat = null;
+      let lng = null;
+      if (typeof el.lat === 'number') {
+        lat = el.lat;
+        lng = el.lon;
+      } else if (el.center) {
+        lat = el.center.lat;
+        lng = el.center.lon;
+      } else if (Array.isArray(el.geometry) && el.geometry.length) {
+        // 중심점이 없으면 외곽선 평균으로 대신한다.
+        const pts = el.geometry.filter((p) => p && typeof p.lat === 'number');
+        if (!pts.length) continue;
+        lat = pts.reduce((a, p) => a + p.lat, 0) / pts.length;
+        lng = pts.reduce((a, p) => a + p.lon, 0) / pts.length;
+      }
+      if (lat === null || lng === null) continue;
+
+      seen.add(name);
+      const dLat = lat - center.lat;
+      const dLng = (lng - center.lng) * Math.cos((center.lat * Math.PI) / 180);
+      labels.push({ name, lat, lng, d2: dLat * dLat + dLng * dLng });
+    }
+    // 화면이 글자로 덮이지 않게 가까운 것부터 자른다.
+    labels.sort((a, b) => a.d2 - b.d2);
+    return labels.slice(0, limit);
+  }
+
   async function fetchBuildings(point, radiusM) {
+    // 건물 외곽선과 함께, 이름이 붙은 장소(상호·시설)도 같이 받는다.
+    // 배경지도 그림에는 글자가 그려져 있지만 데이터가 아니라 읽을 수 없다.
+    const around = `(around:${radiusM},${point.lat},${point.lng})`;
     const query =
       `[out:json][timeout:25];(` +
-      `way["building"](around:${radiusM},${point.lat},${point.lng});` +
-      `relation["building"](around:${radiusM},${point.lat},${point.lng});` +
-      `);out geom ${1500};`;
+      `way["building"]${around};` +
+      `relation["building"]${around};` +
+      `node["name"]["amenity"]${around};` +
+      `node["name"]["shop"]${around};` +
+      `node["name"]["office"]${around};` +
+      `node["name"]["tourism"]${around};` +
+      `);out center geom ${1500};`;
 
     const response = await fetch(OVERPASS, {
       method: 'POST',
@@ -246,7 +289,8 @@
     });
     if (!response.ok) throw new Error(`건물 데이터 조회 실패 (HTTP ${response.status})`);
     const data = await response.json();
-    return toGeoJson(data.elements || []);
+    const elements = data.elements || [];
+    return { geojson: toGeoJson(elements), labels: toLabels(elements, point, 60) };
   }
 
   function styleFor(kind) {
@@ -297,6 +341,28 @@
     const marker = new maplibregl.Marker({ color: '#dc2626' }).setLngLat([point.lng, point.lat]).addTo(map);
 
     let buildingCount = null;
+    let labelCount = null;
+    let labelMarkers = [];
+
+    /**
+     * 상호·건물명은 HTML 마커로 그린다.
+     * MapLibre의 글자 레이어는 글리프 서버가 있어야 하는데, 한글 글리프를
+     * 따로 호스팅하지 않으려고 DOM으로 그린다. 개수를 제한해 화면이 글자로
+     * 덮이지 않게 한다.
+     */
+    function renderLabels(labels) {
+      labelMarkers.forEach((m) => m.remove());
+      labelMarkers = [];
+      labelCount = labels.length;
+      if (!labelsEl || !labelsEl.checked) return;
+
+      for (const label of labels) {
+        const el = document.createElement('div');
+        el.className = 'poi-label';
+        el.textContent = label.name;
+        labelMarkers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([label.lng, label.lat]).addTo(map));
+      }
+    }
 
     /** 배경을 바꾸면 스타일이 새로 깔리므로 건물 레이어를 다시 얹어야 한다. */
     function addBuildingLayer(geojson) {
@@ -325,14 +391,16 @@
         return;
       }
       try {
-        setStatus('건물 데이터를 받는 중…');
-        const geojson = await fetchBuildings(at, 700);
+        setStatus('건물·상호 데이터를 받는 중…');
+        const { geojson, labels } = await fetchBuildings(at, 700);
         lastGeoJson = geojson;
         buildingCount = geojson.features.length;
         if (buildingCount) addBuildingLayer(geojson);
+        renderLabels(labels);
         describe(at);
       } catch (error) {
         buildingCount = null;
+        labelCount = null;
         setStatus(`건물 데이터를 받지 못했습니다.\n${error.message}`, 'error');
       }
     }
@@ -343,13 +411,14 @@
           ? ''
           : buildingCount === 0
             ? '이 주변은 OpenStreetMap에 등록된 건물이 없어 세울 것이 없습니다.'
-            : `건물 ${buildingCount.toLocaleString('ko-KR')}동을 세웠습니다.`;
+            : `건물 ${buildingCount.toLocaleString('ko-KR')}동을 세웠습니다.` +
+              (labelCount ? ` 상호·건물명 ${labelCount}개.` : ' 등록된 상호명은 없습니다.');
       setStatus([`${placeEl.value}`, buildings].filter(Boolean).join('\n'), 'ok');
       diag([
         '방식: MapLibre + VWorld 타일 + OSM 건물',
         `이유: ${reason}`,
         `좌표: ${at.lat}, ${at.lng}`,
-        buildingCount === null ? '' : `건물: ${buildingCount}동 (반경 700m)`,
+        buildingCount === null ? '' : `건물: ${buildingCount}동 · 이름: ${labelCount || 0}개 (반경 700m)`,
         '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
       ]);
     }
@@ -365,6 +434,9 @@
     }
     if (buildingsEl) {
       buildingsEl.addEventListener('change', () => loadBuildings(currentPoint));
+    }
+    if (labelsEl) {
+      labelsEl.addEventListener('change', () => loadBuildings(currentPoint));
     }
 
     let currentPoint = point;

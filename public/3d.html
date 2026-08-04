@@ -74,6 +74,9 @@
       .three-d__check input {
         margin: 0;
       }
+      .three-d__check {
+        gap: 8px;
+      }
 
       .three-d__actions {
         display: flex;
@@ -101,6 +104,21 @@
         text-decoration: none;
         text-align: center;
       }
+      .poi-label {
+        padding: 3px 7px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.94);
+        color: #0f172a;
+        font-size: 11.5px;
+        font-weight: 600;
+        line-height: 1.2;
+        white-space: nowrap;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+        pointer-events: none;
+        transform: translateY(-6px);
+      }
+
       #status3d {
         margin: 0 0 12px;
         padding: 10px 12px;
@@ -170,6 +188,7 @@
 
         <div class="three-d__field three-d__check">
           <label><input id="buildings" type="checkbox" checked /> 건물 3D로 세우기</label>
+          <label><input id="labels" type="checkbox" checked /> 상호·건물명 표시</label>
         </div>
 
         <div class="three-d__actions">
@@ -185,5 +204,6 @@
 
     <script src="data/signs.js" onerror="void 0"></script>
     <script src="3d.js"></script>
+    <script src="sw-register.js"></script>
   </body>
 </html>

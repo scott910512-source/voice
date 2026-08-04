@@ -106,14 +106,6 @@
     <script src="data/signs.js" onerror="void 0"></script>
     <script src="map.js"></script>
     <script src="app.js"></script>
-    <script>
-      if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').catch(() => {
-            /* 서버 모드에는 sw.js가 없다. 무시한다. */
-          });
-        });
-      }
-    </script>
+    <script src="sw-register.js"></script>
   </body>
 </html>

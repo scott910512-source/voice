@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const config = require('../config');
 const { fetchData } = require('./fetch-data');
@@ -62,8 +63,33 @@ function writeManifest() {
 }
 
 /**
+ * 빌드 결과물 전체의 내용 해시.
+ *
+ * 서비스워커 버전을 데이터 시각으로만 잡으면, 데이터가 그대로인 채 코드만
+ * 고친 배포에서는 sw.js가 한 글자도 바뀌지 않는다. 그러면 브라우저가 새
+ * 서비스워커를 설치하지 않아 사용자는 옛 코드를 계속 쓰게 된다. 실제로
+ * 그래서 강력 새로고침을 해야만 수정이 반영됐다. 내용이 바뀌면 버전도
+ * 바뀌도록 파일 내용에서 해시를 만든다.
+ */
+function contentHash(dir) {
+  const hash = crypto.createHash('sha1');
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name !== 'sw.js') {
+        hash.update(path.relative(dir, full));
+        hash.update(fs.readFileSync(full));
+      }
+    }
+  };
+  walk(dir);
+  return hash.digest('hex').slice(0, 12);
+}
+
+/**
  * 앱 셸과 데이터를 캐시해 오프라인에서도 열리게 한다.
- * 버전 문자열이 바뀌면 이전 캐시를 지우므로, 데이터 갱신 때마다 새 버전을 넣는다.
+ * 버전이 바뀌면 이전 캐시를 지우고 새로 받는다.
  */
 function writeServiceWorker(version) {
   const assets = [
@@ -176,7 +202,9 @@ async function build() {
 
   const bytes = writeDataFile(payload);
   writeManifest();
-  writeServiceWorker(data.generatedAt || 'dev');
+  // 매니페스트·데이터까지 쓴 뒤에 해시를 낸다. 그래야 데이터만 바뀐 배포도 잡힌다.
+  const version = contentHash(DOCS_DIR);
+  writeServiceWorker(version);
 
   const mapProvider = config.map.naverClientId
     ? '네이버 지도'
@@ -189,6 +217,7 @@ async function build() {
   console.log('');
   console.log(`docs/ 빌드 완료 · 표지 ${data.signs.length}건 · 데이터 ${Math.round(bytes / 1024)}KB`);
   console.log(`지도: ${mapProvider}`);
+  console.log(`버전: ${version}`);
 }
 
 build().catch((error) => {
