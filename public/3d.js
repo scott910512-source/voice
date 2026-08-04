@@ -49,6 +49,36 @@
     });
   }
 
+  /**
+   * webglMapInit.js.do 는 로더다. 이 파일이 받아진 뒤에 실제 3D 엔진을
+   * 비동기로 더 불러오기 때문에, onload 직후에는 vw가 아직 없다.
+   * 준비될 때까지 기다린다.
+   */
+  function waitForVw(timeoutMs) {
+    const startedAt = Date.now();
+    return new Promise((resolve) => {
+      const tick = () => {
+        const vw = window.vw;
+        if (vw && (typeof vw.Map === 'function' || typeof vw.MapController === 'function')) {
+          resolve({ ok: true, waitedMs: Date.now() - startedAt });
+          return;
+        }
+        if (Date.now() - startedAt >= timeoutMs) {
+          resolve({ ok: false, waitedMs: Date.now() - startedAt, partial: !!vw });
+          return;
+        }
+        setTimeout(tick, 200);
+      };
+      tick();
+    });
+  }
+
+  /** vw가 끝내 안 생겼을 때, 무엇이 생겼는지 보여 준다. */
+  function foundGlobals() {
+    const hits = Object.keys(window).filter((k) => /^(vw|Cesium|vworld|ol)$/i.test(k));
+    return hits.length ? hits.join(', ') : '없음';
+  }
+
   function parseLatLng(input) {
     const m = String(input).trim().match(/^(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)$/);
     if (!m) return null;
@@ -227,15 +257,21 @@
 
     const tried = [];
     let loaded = null;
-    for (const candidate of candidates) {
+    for (let i = 0; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
       try {
+        setStatus(`VWorld 3D 스크립트를 불러오는 중… (${candidate.label})`);
         await loadScript(candidate.src);
-        // 스크립트가 200이어도 인증 실패면 vw가 만들어지지 않는다.
-        if (window.vw) {
-          loaded = candidate;
+        // 로더가 3D 엔진을 더 받아올 때까지 기다린다. 바로 확인하면 아직 없다.
+        // 첫 후보는 넉넉히 주고, 이후는 짧게 본다. 폰에서 오래 멈춰 있으면 안 된다.
+        const ready = await waitForVw(i === 0 ? 12000 : 5000);
+        if (ready.ok) {
+          loaded = { ...candidate, waitedMs: ready.waitedMs };
           break;
         }
-        tried.push(`${candidate.label}: 받았지만 vw 객체 없음`);
+        tried.push(
+          `${candidate.label}: ${ready.partial ? 'vw는 생겼지만 생성자 없음' : 'vw 안 생김'} (${Math.round(ready.waitedMs / 1000)}초 대기)`
+        );
       } catch (error) {
         tried.push(`${candidate.label}: 불러오기 실패`);
       }
@@ -243,12 +279,18 @@
 
     if (!loaded) {
       setStatus(
-        'VWorld 3D 스크립트를 불러오지 못했습니다.\n' +
+        'VWorld 3D 엔진이 준비되지 않았습니다.\n' +
           `${tried.join('\n')}\n\n` +
-          `VWorld 콘솔 → 인증키 관리 → 서비스 URL에 "${domain}" 을 등록했는지 확인하세요.`,
+          '2D 지도는 같은 키로 동작하므로 인증키와 도메인 등록은 정상입니다.\n' +
+          '3D(WebGL)는 별도 승인이 필요할 수 있습니다.',
         'error'
       );
-      diag([`인증키: ${key.slice(0, 8)}…`, `인증도메인: ${domain}`, ...tried]);
+      diag([
+        `인증키: ${key.slice(0, 8)}…`,
+        `인증도메인: ${domain}`,
+        `전역 객체: ${foundGlobals()}`,
+        ...tried,
+      ]);
       return;
     }
 
@@ -259,7 +301,7 @@
       setStatus(`3D 지도 준비 완료\n${placeEl.value}`, 'ok');
       diag([
         `인증키: ${key.slice(0, 8)}…`,
-        `스크립트: ${loaded.label}`,
+        `스크립트: ${loaded.label} (엔진 준비 ${Math.round(loaded.waitedMs / 1000)}초)`,
         `초기화 방식: ${mode}`,
         `좌표: ${start.lat}, ${start.lng}`,
         tried.length ? `건너뛴 후보: ${tried.join(' / ')}` : '',
