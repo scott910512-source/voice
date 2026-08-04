@@ -45,6 +45,9 @@ const config = {
   // 일일 트래픽이 5,000건이므로 한 번의 전체 조회가 그 안에서 끝나도록 상한을 둔다.
   maxRecords: intFromEnv('MAX_RECORDS', 3000),
   maxPages: intFromEnv('MAX_PAGES', 60),
+  // 전체 조회 시간 상한. 뒤쪽 페이지에서 응답이 멎어도 여기서 끊고
+  // 받은 만큼으로 진행한다.
+  deadlineMs: intFromEnv('FETCH_DEADLINE_MS', 90000),
   timeoutMs: intFromEnv('API_TIMEOUT_MS', 15000),
   retries: intFromEnv('API_RETRIES', 3),
   cacheTtlMs: intFromEnv('CACHE_TTL_MS', 6 * 60 * 60 * 1000),

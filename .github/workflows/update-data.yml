@@ -14,11 +14,14 @@ permissions:
 
 concurrency:
   group: update-data
-  cancel-in-progress: false
+  # 새 푸시가 오면 진행 중인 실행을 대체한다. 공공데이터 응답이 멎어
+  # 오래 매달리는 경우가 있어, 큐에 쌓아두는 것보다 낫다.
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 

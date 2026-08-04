@@ -133,6 +133,13 @@ function startMockServer(mode, serverPageCap) {
       const type = url.searchParams.get('type');
       const slice = MOCK_ITEMS.slice((pageNo - 1) * numOfRows, pageNo * numOfRows);
 
+      // 뒤쪽 페이지에서 서버가 죽는 상황. 실제로 이 API에서 관측됐다.
+      if (mode === 'failAfterFirst' && pageNo > 1) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('SERVICE ERROR');
+        return;
+      }
+
       // 실제 지자체 API처럼, JSON을 요청해도 XML만 돌려주는 모드를 재현한다.
       if (mode === 'xmlOnly' || type === 'xml') {
         const items = slice
@@ -175,6 +182,7 @@ async function runPipeline(mode, numOfRows, serverPageCap) {
       numOfRows,
       maxRecords: 1000,
       maxPages: 60,
+      deadlineMs: 30000,
       timeoutMs: 5000,
       retries: 0,
       extraParams: {},
@@ -216,6 +224,14 @@ test('numOfRows를 무시하고 적게 주는 API에서도 전체를 모은다',
   assert.strictEqual(result.fetchedCount, 5, `기대 5건, 실제 ${result.fetchedCount}건`);
   assert.strictEqual(result.pageSize, 2);
   assert.strictEqual(signs.length, 5);
+});
+
+test('뒤쪽 페이지가 실패해도 앞에서 받은 것은 살린다', async () => {
+  const { result, signs } = await runPipeline('failAfterFirst', 500, 2);
+  assert.strictEqual(result.fetchedCount, 2, `기대 2건, 실제 ${result.fetchedCount}건`);
+  assert.strictEqual(result.truncated, true);
+  assert.ok(result.notes.some((note) => note.includes('2페이지 실패')), `메모 없음: ${result.notes}`);
+  assert.strictEqual(signs.length, 2);
 });
 
 test('세종시 실제 응답 형태를 그대로 처리한다', () => {

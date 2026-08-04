@@ -30,6 +30,11 @@ async function fetchData() {
   console.log(`형식        : ${result.format} (요청 type=${result.requestedType})`);
   console.log(`전체 건수   : ${result.totalCount}`);
   console.log(`수신 건수   : ${result.fetchedCount}`);
+  console.log(`페이지 크기 : ${result.pageSize}`);
+  console.log(`소요 시간   : ${(result.elapsedMs / 1000).toFixed(1)}초`);
+  if (result.notes && result.notes.length) {
+    result.notes.forEach((note) => console.log(`페이지 메모  : ${note}`));
+  }
   console.log(`좌표 인식   : ${mappable} / ${signs.length}`);
   console.log(`좌표 출처   : ${signs.find((s) => s.mappable)?.coordSource || '없음'}`);
   console.log('');
