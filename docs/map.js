@@ -213,17 +213,42 @@
     const L = window.L;
     const map = L.map(container).setView([SEJONG_CENTER.lat, SEJONG_CENTER.lng], 12);
 
-    if (vworldKey) {
-      // 국토교통부 VWorld 국내 배경지도. 국내 도로·지번 표기가 들어간다.
-      L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Base/{z}/{y}/{x}.png`, {
-        maxZoom: 19,
-        attribution: '© VWorld (국토교통부)',
-      }).addTo(map);
-    } else {
+    let noticeHandler = null;
+    const notify = (message) => noticeHandler && noticeHandler(message);
+
+    const openStreetMap = () =>
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '© OpenStreetMap contributors',
-      }).addTo(map);
+      });
+
+    if (vworldKey) {
+      // 국토교통부 VWorld 국내 배경지도. 국내 도로·지번 표기가 들어간다.
+      // WMTS 경로는 /{z}/{TileRow}/{TileCol} 이라 Leaflet의 {y}/{x} 순서다.
+      const vworld = L.tileLayer(`https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/Base/{z}/{y}/{x}.png`, {
+        maxZoom: 19,
+        attribution: '© VWorld (국토교통부)',
+      });
+
+      // VWorld는 콘솔에 등록되지 않은 도메인에서 오는 요청을 거절한다.
+      // 그 경우 지도가 통째로 회색이 되는데, 원인을 알 수 없으면 앱이
+      // 고장난 것처럼 보인다. 몇 장 연속 실패하면 OSM으로 내리고 알린다.
+      let failures = 0;
+      let switched = false;
+      vworld.on('tileerror', () => {
+        failures += 1;
+        if (switched || failures < 3) return;
+        switched = true;
+        map.removeLayer(vworld);
+        openStreetMap().addTo(map);
+        notify(
+          'VWorld 지도를 불러오지 못해 OpenStreetMap으로 전환했습니다. ' +
+            'VWorld 콘솔의 인증키 설정에 이 사이트 주소가 등록되어 있는지 확인하세요.'
+        );
+      });
+      vworld.addTo(map);
+    } else {
+      openStreetMap().addTo(map);
     }
 
     const layer = L.layerGroup().addTo(map);
@@ -254,6 +279,9 @@
       },
       onIdle(fn) {
         map.on('moveend zoomend', fn);
+      },
+      onNotice(fn) {
+        noticeHandler = fn;
       },
       setFocusArea(center, radius) {
         if (this.__focus) this.__focus.forEach((o) => map.removeLayer(o));

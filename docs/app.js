@@ -23,6 +23,7 @@
   const clearLocateEl = document.getElementById('clear-locate');
   const locateResultEl = document.getElementById('locate-result');
   const verdictEl = document.getElementById('verdict');
+  const mapNoticeEl = document.getElementById('map-notice');
 
   let mapAdapter = null;
   let allSigns = [];
@@ -438,6 +439,12 @@
     try {
       mapAdapter = await window.SejongMap.create(document.getElementById('map'), mapConfig);
       mapAdapter.onMarkerClick(showDetail);
+      if (mapAdapter.onNotice) {
+        mapAdapter.onNotice((message) => {
+          mapNoticeEl.textContent = message;
+          mapNoticeEl.hidden = false;
+        });
+      }
     } catch (error) {
       setStatus(`지도를 초기화하지 못했습니다: ${error.message}`, 'error');
     }
