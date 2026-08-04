@@ -74,7 +74,7 @@ const config = {
     naverClientSecret: process.env.NAVER_MAP_CLIENT_SECRET || '',
   },
   // 화면을 처음 열었을 때 중심이 될 위치.
-  defaultAddress: process.env.DEFAULT_ADDRESS || '세종특별자치시 연동면 명학산단로 110-5',
+  defaultAddress: process.env.DEFAULT_ADDRESS || '세종특별자치시 연동면 내판리 715',
   defaultRadius: intFromEnv('DEFAULT_RADIUS_M', 500),
 };
 

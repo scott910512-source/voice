@@ -166,7 +166,7 @@
 
         <div class="three-d__field">
           <label for="place">위치</label>
-          <input id="place" type="search" value="세종특별자치시 연동면 명학산단로 110-5" autocomplete="off" />
+          <input id="place" type="search" value="세종특별자치시 연동면 내판리 715" autocomplete="off" />
         </div>
 
         <div class="three-d__field">
@@ -183,6 +183,27 @@
           <select id="layer">
             <option value="base">일반 지도</option>
             <option value="satellite">위성 영상</option>
+            <option value="hybrid">위성 + 지명</option>
+            <option value="gray">회색 지도</option>
+            <option value="midnight">야간 지도</option>
+          </select>
+        </div>
+
+        <div class="three-d__field">
+          <label for="mood">색감 (보기 효과)</label>
+          <select id="mood">
+            <option value="none">기본</option>
+            <option value="sepia">옛날 사진 느낌</option>
+            <option value="faded">빛바랜 느낌</option>
+            <option value="mono">흑백</option>
+          </select>
+        </div>
+
+        <div class="three-d__field">
+          <label for="source">건물 데이터</label>
+          <select id="source">
+            <option value="auto">국가 데이터 우선 (전국·층수 정확)</option>
+            <option value="osm">OpenStreetMap (사진과 잘 맞음)</option>
           </select>
         </div>
 

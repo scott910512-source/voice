@@ -13,11 +13,10 @@
    * 입체는 없지만 시점은 3D다.
    */
 
-  const DEFAULT = {
-    lat: 36.543499,
-    lng: 127.3321156,
-    label: '세종특별자치시 연동면 명학산단로 110-5',
-  };
+  // 기본 주소는 좌표를 박아두지 않고 실제로 찾아간다. 주소만 바꾸고 좌표를
+  // 그대로 두면 엉뚱한 곳이 열리는데, 실제로 한 번 그랬다.
+  const DEFAULT_ADDRESS = '세종특별자치시 연동면 내판리 715';
+  const SEJONG_CENTER = { lat: 36.48, lng: 127.289, label: '세종특별자치시' };
 
   const statusEl = document.getElementById('status3d');
   const diagEl = document.getElementById('diag');
@@ -27,6 +26,26 @@
   const layerEl = document.getElementById('layer');
   const buildingsEl = document.getElementById('buildings');
   const labelsEl = document.getElementById('labels');
+  const moodEl = document.getElementById('mood');
+  const sourceEl = document.getElementById('source');
+
+  /**
+   * 색감 효과.
+   *
+   * 진짜 과거 항공사진은 공개 타일 API가 없어(국토정보플랫폼 뷰어에서만
+   * 연도별로 볼 수 있다) 시대를 되돌릴 수는 없다. 대신 화면 색감만 바꿔
+   * 옛날 사진처럼 보이게 한다. 데이터가 아니라 보기 효과임을 분명히 한다.
+   */
+  function applyMood(value) {
+    const container = document.getElementById('vmap');
+    const filters = {
+      none: '',
+      sepia: 'sepia(0.72) contrast(1.05) saturate(0.85) brightness(0.98)',
+      mono: 'grayscale(1) contrast(1.1)',
+      faded: 'sepia(0.35) saturate(0.6) contrast(0.92) brightness(1.06)',
+    };
+    container.style.filter = filters[value] || '';
+  }
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
   let vworldKey = '';
@@ -178,11 +197,19 @@
 
   /* ------------------------------------------ MapLibre + VWorld 타일 대안 */
 
+  /** VWorld가 제공하는 배경지도 종류. 확장자가 레이어마다 다르다. */
+  const VWORLD_LAYERS = {
+    base: { layer: 'Base', ext: 'png' },
+    gray: { layer: 'gray', ext: 'png' },
+    midnight: { layer: 'midnight', ext: 'png' },
+    satellite: { layer: 'Satellite', ext: 'jpeg' },
+    hybrid: { layer: 'Hybrid', ext: 'png' },
+  };
+
   function vworldTiles(kind) {
-    const layer = kind === 'satellite' ? 'Satellite' : 'Base';
-    const ext = kind === 'satellite' ? 'jpeg' : 'png';
+    const spec = VWORLD_LAYERS[kind] || VWORLD_LAYERS.base;
     // WMTS 경로는 /{z}/{TileRow}/{TileCol} 이라 {y}/{x} 순서다.
-    return `https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/${layer}/{z}/{y}/{x}.${ext}`;
+    return `https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/${spec.layer}/{z}/{y}/{x}.${spec.ext}`;
   }
 
   /* ------------------------------------------------------------ 건물 3D */
@@ -440,18 +467,22 @@
   }
 
   function styleFor(kind) {
-    return {
-      version: 8,
-      sources: {
-        base: {
-          type: 'raster',
-          tiles: [vworldTiles(kind)],
-          tileSize: 256,
-          attribution: '© VWorld (국토교통부)',
-        },
+    const sources = {
+      base: {
+        type: 'raster',
+        tiles: [vworldTiles(kind === 'hybrid' ? 'satellite' : kind)],
+        tileSize: 256,
+        attribution: '© VWorld (국토교통부)',
       },
-      layers: [{ id: 'base', type: 'raster', source: 'base' }],
     };
+    const layers = [{ id: 'base', type: 'raster', source: 'base' }];
+
+    // 하이브리드는 위성 위에 도로·지명을 겹치는 레이어라 단독으로는 비어 보인다.
+    if (kind === 'hybrid') {
+      sources.overlay = { type: 'raster', tiles: [vworldTiles('hybrid')], tileSize: 256 };
+      layers.push({ id: 'overlay', type: 'raster', source: 'overlay' });
+    }
+    return { version: 8, sources, layers };
   }
 
   async function startFallback(point, tilt, reason) {
@@ -539,24 +570,32 @@
         return;
       }
       try {
-        // 국가 건물 데이터를 먼저 본다. 전국을 덮고 층수가 들어 있다.
-        setStatus('국가 건물 데이터를 받는 중…');
+        // 출처 선택. 국가 데이터는 전국을 덮고 층수가 정확하지만 연속지적도
+        // 기반이라 항공사진과 어긋날 수 있다. OSM은 사진을 보고 그린 것이라
+        // 사진과 잘 맞는 대신 도심 밖이 비어 있다. 그래서 고를 수 있게 한다.
+        const want = sourceEl ? sourceEl.value : 'auto';
         let geojson = null;
         let labels = [];
-        const national = await fetchVworldBuildings(at, 700);
+
+        let national = null;
+        if (want !== 'osm') {
+          setStatus('국가 건물 데이터를 받는 중…');
+          national = await fetchVworldBuildings(at, 700);
+        }
 
         if (national && national.geojson) {
           geojson = national.geojson;
           labels = national.labels;
-          buildingSource = `국토부 GIS건물통합정보 (${national.layer})`;
+          buildingSource = `국토부 GIS건물통합정보 (${national.layer}) — 지적도 기반이라 사진과 어긋날 수 있음`;
         } else {
           // 국가 데이터가 안 되면 OSM으로 내려간다.
           setStatus('건물·상호 데이터를 받는 중…');
           const osm = await fetchBuildings(at, 700);
           geojson = osm.geojson;
           labels = osm.labels;
-          buildingSource = 'OpenStreetMap';
-          nationalNote = national && national.failed ? national.failed.join(' / ') : '';
+          buildingSource = 'OpenStreetMap (항공사진과 잘 맞음)';
+          nationalNote =
+            want === 'osm' ? '' : national && national.failed ? national.failed.join(' / ') : '';
         }
 
         lastGeoJson = geojson;
@@ -604,6 +643,9 @@
     }
     if (labelsEl) {
       labelsEl.addEventListener('change', () => loadBuildings(currentPoint));
+    }
+    if (sourceEl) {
+      sourceEl.addEventListener('change', () => loadBuildings(currentPoint));
     }
 
     let currentPoint = point;
@@ -655,8 +697,19 @@
     vworldKey = (data.map && data.map.vworldKey) || '';
 
     const params = new URLSearchParams(location.search);
-    const point = parseLatLng(params.get('at') || '') || DEFAULT;
-    placeEl.value = params.get('name') || (point === DEFAULT ? DEFAULT.label : point.label);
+    const given = parseLatLng(params.get('at') || '');
+    placeEl.value = params.get('name') || (given ? given.label : DEFAULT_ADDRESS);
+
+    let point = given;
+    if (!point) {
+      // 좌표가 안 넘어왔으면 기본 주소를 찾아본다. 실패하면 세종시 중심에서 시작한다.
+      setStatus('기본 위치를 찾는 중…');
+      try {
+        point = await geocode(DEFAULT_ADDRESS);
+      } catch (_) {
+        point = SEJONG_CENTER;
+      }
+    }
 
     if (!vworldKey) {
       setStatus('VWorld 인증키가 없어 지도를 띄울 수 없습니다.', 'error');
@@ -700,6 +753,11 @@
       setStatus(`3D 지도를 띄우지 못했습니다.\n${error.message}`, 'error');
       diag([reason, ...result.tried]);
     }
+  }
+
+  if (moodEl) {
+    moodEl.addEventListener('change', () => applyMood(moodEl.value));
+    applyMood(moodEl.value);
   }
 
   goEl.addEventListener('click', go);

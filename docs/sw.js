@@ -1,5 +1,9 @@
 /* 자동 생성 파일. scripts/build-static.js 가 만든다. */
+<<<<<<< HEAD
 const VERSION = "01e3bb975b60";
+=======
+const VERSION = "f253708aec5f";
+>>>>>>> 95f5471 (기본 주소 변경, 건물 출처 선택, 배경·색감 추가)
 const CACHE = 'sejong-parking-' + VERSION;
 const ASSETS = [
   "./",
