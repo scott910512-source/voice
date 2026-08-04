@@ -1,5 +1,5 @@
 /* 자동 생성 파일. scripts/build-static.js 가 만든다. */
-const VERSION = "2026-08-04T05:20:56.589Z";
+const VERSION = "2026-08-04T05:26:46.003Z";
 const CACHE = 'sejong-parking-' + VERSION;
 const ASSETS = [
   "./",
