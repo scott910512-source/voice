@@ -58,14 +58,6 @@ jobs:
           [ -z "$VWORLD_KEY" ] && unset VWORLD_KEY
           node scripts/check-map-key.js "세종특별자치시 연동면 명학산단로 110-5" 2>&1 | tee mapkey.log
 
-      - name: 주차장 데이터 후보 API 확인
-        if: always()
-        env:
-          SERVICE_KEY: ${{ secrets.SERVICE_KEY }}
-        run: |
-          [ -z "$SERVICE_KEY" ] && unset SERVICE_KEY
-          node scripts/probe-parking-api.js 2>&1 | tee parking.log
-
       - name: 테스트
         run: npm test
 
@@ -83,12 +75,6 @@ jobs:
             echo ''
             echo '```'
             cat mapkey.log 2>/dev/null || echo '확인 로그 없음'
-            echo '```'
-            echo ''
-            echo '## 주차장 데이터 후보 API'
-            echo ''
-            echo '```'
-            cat parking.log 2>/dev/null || echo '확인 로그 없음'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
