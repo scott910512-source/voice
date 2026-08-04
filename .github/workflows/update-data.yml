@@ -5,8 +5,11 @@ on:
     branches:
       - claude/sejong-road-sign-api-cuapbl
   schedule:
-    # 매일 04:00 UTC (한국시간 13:00)
-    - cron: '0 4 * * *'
+    # 매주 월요일 04:00 UTC (한국시간 13:00).
+    # 원본 데이터의 기준일자(crtrYmd)가 2020-01-20이라 자주 돌 이유가 없다.
+    # GitHub 러너에서 apis.data.go.kr 로의 접속이 간헐적으로 막히기도 해서,
+    # 매일 돌리면 실패 알림만 쌓인다.
+    - cron: '0 4 * * 1'
   workflow_dispatch:
 
 permissions:
