@@ -6,9 +6,31 @@
 - 엔드포인트: `https://apis.data.go.kr/5690000/sjRoadSign/sj_00000270`
 - 일일 트래픽: 5,000건 (서버가 캐시와 조회 상한으로 보호합니다)
 
-## 실행
+## 서버 없이 쓰기 (PWA)
 
-가장 쉬운 방법은 운영체제에 맞는 파일을 **더블클릭**하는 것입니다. 브라우저까지 자동으로 열립니다.
+**설치도 실행도 필요 없는 방법입니다.** GitHub Actions가 하루 한 번 공공데이터를 받아 정적 파일로 만들고, GitHub Pages가 그대로 서빙합니다. 브라우저에서 주소만 열면 됩니다.
+
+```
+https://scott910512-source.github.io/voice/
+```
+
+- 휴대폰에서 열고 "홈 화면에 추가"하면 앱처럼 설치됩니다 (PWA)
+- 데이터가 앱 안에 들어 있어 **비행기 모드에서도** 지도와 표지 목록이 뜹니다
+- 지도 타일과 주소 검색만 인터넷을 씁니다
+
+### Pages 켜는 법 (최초 1회)
+
+GitHub 저장소 → **Settings → Pages → Source: Deploy from a branch** → 브랜치와 `/docs` 폴더 선택 → Save.
+
+### 데이터 갱신
+
+`.github/workflows/update-data.yml`이 매일 13:00(KST)에 돌면서 `docs/`를 갱신합니다. Actions 탭에서 **Run workflow**로 즉시 실행할 수도 있고, 실행 요약에 **실제 API 응답 필드와 주차 분류 결과**가 남으므로 데이터가 이상할 때 그 로그부터 보면 됩니다.
+
+인증키를 저장소에 남기고 싶지 않으면 Settings → Secrets → Actions에 `SERVICE_KEY`를 넣으세요. 있으면 그것을 우선 사용합니다.
+
+## 서버로 실행하기
+
+항상 최신 데이터를 보려면 로컬 서버를 띄웁니다. 가장 쉬운 방법은 운영체제에 맞는 파일을 **더블클릭**하는 것입니다. 브라우저까지 자동으로 열립니다.
 
 - Windows: `start.bat`
 - macOS / Linux: `start.command`
@@ -81,9 +103,18 @@ Leaflet은 `public/vendor/leaflet/`에 포함해 두었습니다. 사내망·폐
 
 ## 위치로 찾기
 
-왼쪽 위 검색창에 도로명주소를 넣고 반경을 고르면, 그 주변 주차 표지를 **가까운 순서로** 보여주고 지도에 반경 원을 그립니다. 기본값은 `세종특별자치시 연동면 명학산단로 110-5` / 반경 500m이며 `.env`의 `DEFAULT_ADDRESS`, `DEFAULT_RADIUS_M`으로 바꿉니다.
+왼쪽 위 검색창에 도로명주소를 넣고 반경을 고르면, 그 주변 주차 표지를 **가까운 순서로** 보여주고 지도에 반경 원을 그립니다. 결과 위에는 판정 한 줄이 뜹니다.
 
-주소 검색은 `VWORLD_KEY` → `KAKAO_REST_KEY` → 네이버(`NAVER_MAP_CLIENT_ID` + `NAVER_MAP_CLIENT_SECRET`) → OSM Nominatim 순으로 시도합니다. 키가 없으면 국내 도로명 정확도가 떨어지므로, 그럴 때는 검색창에 **`36.4801, 127.2890` 처럼 좌표를 직접 입력**해도 됩니다. 지오코딩 없이 바로 인식합니다.
+| 판정 | 조건 |
+| --- | --- |
+| 주차 불가 가능성 높음 | 100m 안에 주차금지·정차주차금지 표지가 있음 |
+| 주차 가능 구역이 가까움 | 100m 안에 규제가 없고 300m 안에 주차장 표지가 있음 |
+| 바로 옆에는 표지가 없음 | 반경 안에는 표지가 있지만 100m 안에는 없음 |
+| 주차 관련 표지 없음 | 반경 안에 주차 관련 표지가 등록되어 있지 않음 |
+
+표지가 없다고 주차가 허용된다는 뜻은 아닙니다. 이 판정은 등록된 도로안전표지만 근거로 하며, 현장 표지와 노면 표시가 우선합니다. 기본값은 `세종특별자치시 연동면 명학산단로 110-5` / 반경 500m이며 `.env`의 `DEFAULT_ADDRESS`, `DEFAULT_RADIUS_M`으로 바꿉니다.
+
+서버 모드에서는 `VWORLD_KEY` → `KAKAO_REST_KEY` → 네이버(`NAVER_MAP_CLIENT_ID` + `NAVER_MAP_CLIENT_SECRET`) → OSM Nominatim 순으로 시도합니다. 정적(PWA) 모드에서는 키가 필요 없는 **Nominatim**을 브라우저에서 직접 씁니다. 키가 없으면 국내 도로명 정확도가 떨어지므로, 그럴 때는 검색창에 **`36.4801, 127.2890` 처럼 좌표를 직접 입력**해도 됩니다. 지오코딩 없이 바로 인식합니다.
 
 ```bash
 curl "http://localhost:3000/api/near?address=세종특별자치시 연동면 명학산단로 110-5&radius=500"
@@ -110,6 +141,10 @@ lib/api.js             공공데이터 호출, 페이지 순회, JSON↔XML 자�
 lib/xml.js             의존성 없는 최소 XML 파서
 lib/normalize.js       좌표 탐지 · 주차 분류 · 스키마 요약
 lib/geocode.js         주소→좌표 변환 · 거리 계산
+scripts/fetch-data.js  공공데이터 조회 + 응답 구조 로깅
+scripts/build-static.js  docs/ 정적 PWA 빌드 (데이터·매니페스트·서비스워커)
+scripts/make-icons.js  PWA 아이콘 PNG 생성 (외부 라이브러리 없이)
+docs/                  GitHub Pages가 서빙하는 정적 웹앱 (자동 생성)
 start.bat / start.command  더블클릭 실행 스크립트
 public/                지도 화면 (index.html, app.js, map.js, style.css)
 public/vendor/leaflet  로컬 포함 Leaflet (폐쇄망 대응)

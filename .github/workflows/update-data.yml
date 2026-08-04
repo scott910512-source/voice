@@ -1,0 +1,71 @@
+name: 공공데이터 갱신 및 Pages 배포
+
+on:
+  push:
+    branches:
+      - claude/sejong-road-sign-api-cuapbl
+  schedule:
+    # 매일 04:00 UTC (한국시간 13:00)
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 공공데이터 조회 및 정적 앱 빌드
+        id: build
+        env:
+          # 저장소 시크릿이 있으면 그것을 쓰고, 없으면 config.js의 기본 인증키를 쓴다.
+          SERVICE_KEY: ${{ secrets.SERVICE_KEY }}
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+        run: |
+          if [ -z "$SERVICE_KEY" ]; then unset SERVICE_KEY; fi
+          if [ -z "$VWORLD_KEY" ]; then unset VWORLD_KEY; fi
+          node scripts/build-static.js 2>&1 | tee build.log
+
+      - name: 테스트
+        run: npm test
+
+      - name: 갱신 결과 요약
+        if: always()
+        run: |
+          {
+            echo '## 공공데이터 조회 결과'
+            echo ''
+            echo '```'
+            cat build.log 2>/dev/null || echo '빌드 로그 없음'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 변경사항 커밋
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add docs
+          if git diff --staged --quiet; then
+            echo '변경 없음'
+          else
+            git commit -m '데이터 갱신 (자동)'
+            git push
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore

@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js",
+    "build": "node scripts/build-static.js",
+    "build:offline": "node scripts/build-static.js --no-fetch",
+    "icons": "node scripts/make-icons.js"
   },
   "engines": {
     "node": ">=18"
