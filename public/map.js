@@ -206,8 +206,8 @@
   async function createLeaflet(container, vworldKey) {
     // Leaflet은 저장소에 포함해 둔다. 폐쇄망/사내망에서도 지도 틀은 뜨고,
     // 외부로 나가는 요청은 배경지도 타일 하나로 줄어든다.
-    await loadStyle('/vendor/leaflet/leaflet.css');
-    await loadScript('/vendor/leaflet/leaflet.js');
+    await loadStyle('vendor/leaflet/leaflet.css');
+    await loadScript('vendor/leaflet/leaflet.js');
     if (!window.L) throw new Error('Leaflet 로드 실패');
 
     const L = window.L;

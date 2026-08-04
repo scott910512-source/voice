@@ -330,7 +330,7 @@
 
       if (serverMode) {
         const params = new URLSearchParams({ address, radius: String(radius) });
-        const response = await fetch(`/api/near?${params}`);
+        const response = await fetch(`api/near?${params}`);
         payload = await response.json();
         if (!payload.ok) throw new Error(payload.error || '조회에 실패했습니다.');
       } else {
@@ -388,7 +388,7 @@
 
     const params = new URLSearchParams({ category: 'parking_allowed,no_park,no_stop_no_park,other' });
     if (force) params.set('refresh', '1');
-    const response = await fetch(`/api/signs?${params}`);
+    const response = await fetch(`api/signs?${params}`);
     const payload = await response.json();
 
     if (!payload.ok) {
