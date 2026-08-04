@@ -22,6 +22,21 @@ https://scott910512-source.github.io/voice/
 
 GitHub 저장소 → **Settings → Pages → Source: Deploy from a branch** → 브랜치와 `/docs` 폴더 선택 → Save.
 
+### VWorld 지도 (국토교통부)
+
+`VWORLD_KEY`가 설정되어 있으면 VWorld 국내 배경지도를 씁니다. 붙이는 방식은 두 가지가 있는데 이 프로젝트는 **WMTS 타일** 쪽을 씁니다.
+
+| 방식 | 요청 | 이 프로젝트에서 |
+| --- | --- | --- |
+| WMTS 배경지도 타일 | `https://api.vworld.kr/req/wmts/1.0.0/{키}/Base/{z}/{y}/{x}.png` | **사용 중.** Leaflet 타일 레이어 하나로 끝나고, 마커·반경 원·클릭 로직을 그대로 쓴다 |
+| VWorld 지도 엔진 | `https://map.vworld.kr/js/vworldMapInit.js.do?version=2.0&apiKey={키}` | 사용 안 함. OpenLayers 기반 `vw.ol3.Map`을 통째로 불러오는 방식이라, 지금 화면의 지도 관련 코드를 전부 다시 짜야 한다 |
+
+두 방식 모두 **VWorld 콘솔에서 도메인을 등록해야** 동작합니다. 인증키 관리에서 서비스 URL에 배포 주소(예: `https://scott910512-source.github.io`)와 개발용 `http://localhost:3000`을 등록하세요.
+
+등록이 안 되어 있으면 VWorld가 타일 요청을 거절하고 지도가 회색으로 남는데, 원인을 알 수 없으면 앱이 고장난 것처럼 보입니다. 그래서 타일이 연속으로 실패하면 **자동으로 OpenStreetMap으로 내려가고 화면 위에 원인을 띄웁니다.** 지도가 뜨는데 상단에 안내 문구가 보인다면 도메인 등록 문제입니다.
+
+VWorld 키는 지도를 띄우려면 타일 URL에 실려 브라우저로 나가야 하므로 **페이지 소스에 그대로 노출됩니다.** 숨길 수 있는 값이 아니고, VWorld도 키를 감추는 대신 도메인 등록으로 사용을 제한하는 방식입니다. 저장소에서 빼고 싶으면 `config.js`의 기본값을 지우고 저장소 Variable `VWORLD_KEY`로 옮기면 됩니다(배포 페이지에 실리는 것은 마찬가지입니다).
+
 ### 배포된 페이지에 네이버 지도 붙이기
 
 지도는 키 없이도 OpenStreetMap으로 뜹니다. 국내 지도로 바꾸려면 저장소 → **Settings → Secrets and variables → Actions → Variables** 에 아래 중 하나를 넣고 워크플로를 다시 돌리면 됩니다.
