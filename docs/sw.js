@@ -1,9 +1,5 @@
 /* 자동 생성 파일. scripts/build-static.js 가 만든다. */
-<<<<<<< HEAD
-const VERSION = "63cf2da512e9";
-=======
-const VERSION = "a1fe443f848b";
->>>>>>> 96a92c5 (용도지역을 색으로 구분해 보여준다)
+const VERSION = "62d81b86523d";
 const CACHE = 'sejong-map-' + VERSION;
 const ASSETS = [
   "./",
