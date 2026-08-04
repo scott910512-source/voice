@@ -197,6 +197,152 @@
    */
   const OVERPASS = 'https://overpass-api.de/api/interpreter';
 
+  /* ------------------------------------------- VWorld 국가 건물 데이터 */
+
+  /**
+   * 국토교통부 GIS건물통합정보. 연속지적도 기반 건물 외곽선에 건축물대장
+   * 속성(층수 등)을 붙인 데이터이고, VWorld 데이터 API로 받을 수 있다.
+   *
+   * OSM 건물은 도심 위주라 산업단지나 시골이 비는데, 이쪽은 전국을 덮는다.
+   * 그래서 이걸 먼저 시도하고 안 되면 OSM으로 내려간다.
+   *
+   * 레이어 이름을 확신할 수 없어 후보를 순서대로 시도한다. 이 환경에서는
+   * VWorld에 닿지 못해 어느 이름이 맞는지 확인할 수 없었다.
+   */
+  const VWORLD_BUILDING_LAYERS = ['LT_C_BLDGINFO', 'LT_C_SPBD', 'LT_C_BULD', 'LT_C_BLDG'];
+
+  const HEIGHT_FIELDS = ['gro_flo_co', 'grofloco', 'gro_flo_cnt', 'flr_cnt', 'bldg_hg', 'height', '층수', '지상층수'];
+  const NAME_FIELDS = ['bldnm', 'buld_nm', 'bld_nm', 'bldg_nm', 'name', '건물명'];
+
+  function pickField(props, candidates) {
+    const keys = Object.keys(props || {});
+    for (const candidate of candidates) {
+      const hit = keys.find((k) => k.toLowerCase().replace(/[_\s]/g, '') === candidate.toLowerCase().replace(/[_\s]/g, ''));
+      if (hit && String(props[hit]).trim() !== '') return props[hit];
+    }
+    return null;
+  }
+
+  function bboxAround(point, radiusM) {
+    const dLat = radiusM / 111000;
+    const dLng = radiusM / (111000 * Math.cos((point.lat * Math.PI) / 180));
+    return [point.lng - dLng, point.lat - dLat, point.lng + dLng, point.lat + dLat];
+  }
+
+  /**
+   * VWorld 데이터 API는 브라우저에서 부를 때 CORS 헤더가 없을 수 있어
+   * JSONP(callback)로 받는다. 타일과 달리 fetch로는 막힐 수 있기 때문이다.
+   */
+  function jsonp(url, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const name = `__vw_cb_${Math.floor(performance.now() * 1000) % 1e9}_${jsonp.seq = (jsonp.seq || 0) + 1}`;
+      const script = document.createElement('script');
+      let done = false;
+
+      const cleanup = () => {
+        done = true;
+        delete window[name];
+        script.remove();
+      };
+      const timer = setTimeout(() => {
+        if (done) return;
+        cleanup();
+        reject(new Error('응답 없음'));
+      }, timeoutMs);
+
+      window[name] = (data) => {
+        if (done) return;
+        clearTimeout(timer);
+        cleanup();
+        resolve(data);
+      };
+      script.onerror = () => {
+        if (done) return;
+        clearTimeout(timer);
+        cleanup();
+        reject(new Error('불러오기 실패'));
+      };
+      script.src = `${url}&callback=${name}`;
+      document.head.appendChild(script);
+    });
+  }
+
+  /** 성공하면 {geojson, labels, layer}, 지원하지 않으면 null. */
+  async function fetchVworldBuildings(point, radiusM) {
+    if (!vworldKey) return null;
+    const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
+    const domain = location.hostname || 'localhost';
+    const tried = [];
+
+    for (const layer of VWORLD_BUILDING_LAYERS) {
+      const url =
+        `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
+        `&size=1000&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
+        `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(domain)}`;
+      try {
+        const data = await jsonp(url, 12000);
+        const features = data?.response?.result?.featureCollection?.features;
+        if (!Array.isArray(features) || !features.length) {
+          tried.push(`${layer}: 결과 없음`);
+          continue;
+        }
+
+        const labels = [];
+        const out = features.map((feature) => {
+          const props = feature.properties || {};
+          const floors = parseFloat(String(pickField(props, HEIGHT_FIELDS) ?? '').replace(/[^\d.]/g, ''));
+          // 층수로 오는 값이면 3m를 곱하고, 이미 미터면 그대로 쓴다.
+          const height = Number.isFinite(floors) && floors > 0 ? (floors < 200 ? floors * 3 : floors) : 6;
+          const name = pickField(props, NAME_FIELDS);
+          if (name) {
+            const c = centroidOf(feature.geometry);
+            if (c) labels.push({ name: String(name), lat: c.lat, lng: c.lng });
+          }
+          return { type: 'Feature', properties: { height }, geometry: feature.geometry };
+        });
+
+        return {
+          geojson: { type: 'FeatureCollection', features: out },
+          labels: sortNearest(labels, point, 60),
+          layer,
+        };
+      } catch (error) {
+        tried.push(`${layer}: ${error.message}`);
+      }
+    }
+    return { failed: tried };
+  }
+
+  function centroidOf(geometry) {
+    if (!geometry) return null;
+    const rings =
+      geometry.type === 'Polygon'
+        ? geometry.coordinates
+        : geometry.type === 'MultiPolygon'
+          ? geometry.coordinates.flat()
+          : [];
+    const ring = rings[0];
+    if (!Array.isArray(ring) || !ring.length) return null;
+    const lng = ring.reduce((a, p) => a + p[0], 0) / ring.length;
+    const lat = ring.reduce((a, p) => a + p[1], 0) / ring.length;
+    return { lat, lng };
+  }
+
+  function sortNearest(labels, center, limit) {
+    const seen = new Set();
+    const unique = [];
+    for (const label of labels) {
+      if (seen.has(label.name)) continue;
+      seen.add(label.name);
+      const dLat = label.lat - center.lat;
+      const dLng = (label.lng - center.lng) * Math.cos((center.lat * Math.PI) / 180);
+      unique.push({ ...label, d2: dLat * dLat + dLng * dLng });
+    }
+    unique.sort((a, b) => a.d2 - b.d2);
+    return unique.slice(0, limit);
+  }
+
+
   function buildingHeight(tags) {
     const direct = parseFloat(String(tags.height || '').replace(/[^\d.]/g, ''));
     if (Number.isFinite(direct) && direct > 0) return direct;
@@ -342,6 +488,8 @@
 
     let buildingCount = null;
     let labelCount = null;
+    let buildingSource = null;
+    let nationalNote = '';
     let labelMarkers = [];
 
     /**
@@ -391,8 +539,26 @@
         return;
       }
       try {
-        setStatus('건물·상호 데이터를 받는 중…');
-        const { geojson, labels } = await fetchBuildings(at, 700);
+        // 국가 건물 데이터를 먼저 본다. 전국을 덮고 층수가 들어 있다.
+        setStatus('국가 건물 데이터를 받는 중…');
+        let geojson = null;
+        let labels = [];
+        const national = await fetchVworldBuildings(at, 700);
+
+        if (national && national.geojson) {
+          geojson = national.geojson;
+          labels = national.labels;
+          buildingSource = `국토부 GIS건물통합정보 (${national.layer})`;
+        } else {
+          // 국가 데이터가 안 되면 OSM으로 내려간다.
+          setStatus('건물·상호 데이터를 받는 중…');
+          const osm = await fetchBuildings(at, 700);
+          geojson = osm.geojson;
+          labels = osm.labels;
+          buildingSource = 'OpenStreetMap';
+          nationalNote = national && national.failed ? national.failed.join(' / ') : '';
+        }
+
         lastGeoJson = geojson;
         buildingCount = geojson.features.length;
         if (buildingCount) addBuildingLayer(geojson);
@@ -415,8 +581,9 @@
               (labelCount ? ` 상호·건물명 ${labelCount}개.` : ' 등록된 상호명은 없습니다.');
       setStatus([`${placeEl.value}`, buildings].filter(Boolean).join('\n'), 'ok');
       diag([
-        '방식: MapLibre + VWorld 타일 + OSM 건물',
+        `방식: MapLibre + VWorld 타일 + ${buildingSource || '건물 없음'}`,
         `이유: ${reason}`,
+        nationalNote ? `국가 건물 데이터 미사용: ${nationalNote}` : '',
         `좌표: ${at.lat}, ${at.lng}`,
         buildingCount === null ? '' : `건물: ${buildingCount}동 · 이름: ${labelCount || 0}개 (반경 700m)`,
         '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
