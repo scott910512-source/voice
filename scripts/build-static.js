@@ -160,16 +160,31 @@ async function build() {
     ...data,
     defaultAddress: config.defaultAddress,
     defaultRadius: config.defaultRadius,
-    // 정적 배포에는 서버가 없으므로 지도 키를 넣지 않는다. 오픈소스 타일로 뜬다.
-    map: { naverClientId: '', kakaoJsKey: '', vworldKey: '' },
+    // 네이버·카카오 JS 키와 VWorld 키는 브라우저에 노출되는 것이 정상인
+    // 클라이언트 키다(콘솔에서 도메인으로 사용을 제한한다). 설정돼 있으면
+    // 정적 배포에도 넣어 국내 지도로 뜨게 한다. 없으면 오픈소스 타일을 쓴다.
+    map: {
+      naverClientId: config.map.naverClientId,
+      kakaoJsKey: config.map.kakaoJsKey,
+      vworldKey: config.map.vworldKey,
+    },
   };
 
   const bytes = writeDataFile(payload);
   writeManifest();
   writeServiceWorker(data.generatedAt || 'dev');
 
+  const mapProvider = config.map.naverClientId
+    ? '네이버 지도'
+    : config.map.kakaoJsKey
+      ? '카카오맵'
+      : config.map.vworldKey
+        ? 'VWorld 국내 배경지도'
+        : 'OpenStreetMap (지도 키 미설정)';
+
   console.log('');
   console.log(`docs/ 빌드 완료 · 표지 ${data.signs.length}건 · 데이터 ${Math.round(bytes / 1024)}KB`);
+  console.log(`지도: ${mapProvider}`);
 }
 
 build().catch((error) => {

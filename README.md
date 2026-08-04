@@ -22,6 +22,18 @@ https://scott910512-source.github.io/voice/
 
 GitHub 저장소 → **Settings → Pages → Source: Deploy from a branch** → 브랜치와 `/docs` 폴더 선택 → Save.
 
+### 배포된 페이지에 네이버 지도 붙이기
+
+지도는 키 없이도 OpenStreetMap으로 뜹니다. 국내 지도로 바꾸려면 저장소 → **Settings → Secrets and variables → Actions → Variables** 에 아래 중 하나를 넣고 워크플로를 다시 돌리면 됩니다.
+
+| 변수 이름 | 값 |
+| --- | --- |
+| `NAVER_MAP_CLIENT_ID` | 네이버 클라우드 플랫폼 Web Dynamic Map의 Client ID |
+| `KAKAO_MAP_JS_KEY` | 카카오 개발자센터 JavaScript 키 |
+| `VWORLD_KEY` | VWorld 오픈API 인증키 |
+
+Secret이 아니라 **Variable**에 넣습니다. 이 키들은 브라우저에 노출되는 것이 정상인 클라이언트 키이고, 발급처 콘솔에서 **도메인으로 사용을 제한**하는 방식입니다. 네이버·카카오 콘솔의 Web 서비스 URL에 `https://<사용자>.github.io` 를 등록해야 지도가 뜹니다.
+
 ### 데이터 갱신
 
 `.github/workflows/update-data.yml`이 매일 13:00(KST)에 돌면서 `docs/`를 갱신합니다. Actions 탭에서 **Run workflow**로 즉시 실행할 수도 있고, 실행 요약에 **실제 API 응답 필드와 주차 분류 결과**가 남으므로 데이터가 이상할 때 그 로그부터 보면 됩니다.

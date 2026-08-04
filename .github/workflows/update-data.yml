@@ -34,10 +34,15 @@ jobs:
         env:
           # 저장소 시크릿이 있으면 그것을 쓰고, 없으면 config.js의 기본 인증키를 쓴다.
           SERVICE_KEY: ${{ secrets.SERVICE_KEY }}
-          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+          # 지도 키는 브라우저에 노출되는 클라이언트 키다. 콘솔에서 도메인으로
+          # 사용을 제한하는 방식이라 정적 페이지에 들어가도 된다.
+          NAVER_MAP_CLIENT_ID: ${{ vars.NAVER_MAP_CLIENT_ID }}
+          KAKAO_MAP_JS_KEY: ${{ vars.KAKAO_MAP_JS_KEY }}
+          VWORLD_KEY: ${{ vars.VWORLD_KEY }}
         run: |
-          if [ -z "$SERVICE_KEY" ]; then unset SERVICE_KEY; fi
-          if [ -z "$VWORLD_KEY" ]; then unset VWORLD_KEY; fi
+          for name in SERVICE_KEY NAVER_MAP_CLIENT_ID KAKAO_MAP_JS_KEY VWORLD_KEY; do
+            [ -z "${!name}" ] && unset "$name"
+          done
           node scripts/build-static.js 2>&1 | tee build.log
 
       - name: 테스트
