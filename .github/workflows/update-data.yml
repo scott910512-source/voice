@@ -45,6 +45,14 @@ jobs:
           done
           node scripts/build-static.js 2>&1 | tee build.log
 
+      - name: 지도 인증키 확인
+        if: always()
+        env:
+          VWORLD_KEY: ${{ vars.VWORLD_KEY }}
+        run: |
+          [ -z "$VWORLD_KEY" ] && unset VWORLD_KEY
+          node scripts/check-map-key.js "세종특별자치시 연동면 명학산단로 110-5" 2>&1 | tee mapkey.log
+
       - name: 테스트
         run: npm test
 
@@ -56,6 +64,12 @@ jobs:
             echo ''
             echo '```'
             cat build.log 2>/dev/null || echo '빌드 로그 없음'
+            echo '```'
+            echo ''
+            echo '## 지도 인증키 확인'
+            echo ''
+            echo '```'
+            cat mapkey.log 2>/dev/null || echo '확인 로그 없음'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

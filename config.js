@@ -29,6 +29,9 @@ loadDotEnv();
 const FALLBACK_SERVICE_KEY =
   '0r12dGCCu8TOF%2BupSP4ZBLBIoEDfURRfuPo02NDCNkI7bOLBd5rvljznDu4KVxT%2B%2BFuYrEMyAqf%2F9OqRJFqJPA%3D%3D';
 
+/** VWorld 인증키. VWORLD_KEY 환경변수로 덮어쓸 수 있다. */
+const FALLBACK_VWORLD_KEY = '87C1B279-734F-3853-8538-F4B325EFC201';
+
 function intFromEnv(name, fallback) {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
@@ -58,11 +61,14 @@ const config = {
     // 카카오맵 JS SDK 앱키. 네이버 키가 없을 때 사용한다.
     kakaoJsKey: process.env.KAKAO_MAP_JS_KEY || '',
     // 국토교통부 VWorld 인증키. 위 둘이 없을 때 국내 배경지도 타일로 사용한다.
-    vworldKey: process.env.VWORLD_KEY || '',
+    // VWorld 키는 지도를 띄우려면 페이지에 그대로 실려야 하는 클라이언트
+    // 키다(타일 URL과 스크립트 URL에 들어간다). 숨길 수 있는 값이 아니고,
+    // VWorld 콘솔에서 도메인을 등록해 사용을 제한하는 방식이다.
+    vworldKey: process.env.VWORLD_KEY || FALLBACK_VWORLD_KEY,
   },
   geocode: {
     // 주소 검색용 키. 지도 키와 종류가 다르다(카카오는 REST 키, 네이버는 Secret 필요).
-    vworldKey: process.env.VWORLD_KEY || '',
+    vworldKey: process.env.VWORLD_KEY || FALLBACK_VWORLD_KEY,
     kakaoRestKey: process.env.KAKAO_REST_KEY || '',
     naverClientId: process.env.NAVER_MAP_CLIENT_ID || '',
     naverClientSecret: process.env.NAVER_MAP_CLIENT_SECRET || '',
