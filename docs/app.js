@@ -109,8 +109,34 @@
     return {
       level: 'unknown',
       headline: '주차 관련 표지 없음',
-      detail: `반경 ${radiusText} 안에 주차 관련 도로안전표지가 등록되어 있지 않습니다. 표지가 없다고 주차가 허용된다는 뜻은 아니므로 현장 표지를 확인하세요.`,
+      detail:
+        `반경 ${radiusText} 안에 주차 관련 도로안전표지가 등록되어 있지 않습니다. ` +
+        `표지가 없다고 주차가 허용된다는 뜻은 아니므로 현장 표지를 확인하세요.` +
+        (outOfCoverage() ? ` ${coverageNotice()}` : ''),
     };
+  }
+
+  /** 검색 지점이 데이터가 담고 있는 영역 밖인지 본다. */
+  function outOfCoverage() {
+    const bounds = staticData?.coverage?.bounds;
+    if (!bounds || !nearbyResult) return false;
+    const { lat, lng } = nearbyResult.center;
+    const margin = 0.02; // 약 2km 여유
+    return (
+      lat < bounds.minLat - margin ||
+      lat > bounds.maxLat + margin ||
+      lng < bounds.minLng - margin ||
+      lng > bounds.maxLng + margin
+    );
+  }
+
+  function coverageNotice() {
+    const coverage = staticData?.coverage;
+    if (!coverage) return '';
+    const where = [coverage.routes.join('·'), coverage.areas.join('·')].filter(Boolean).join(' / ');
+    return where
+      ? `이 공공데이터는 현재 ${where} 구간만 담고 있어, 검색하신 위치는 아예 포함되어 있지 않습니다.`
+      : '';
   }
 
   function renderVerdict(result) {
@@ -354,7 +380,8 @@
       renderCounts();
       refreshView();
       const generated = staticData.generatedAt ? new Date(staticData.generatedAt).toLocaleString('ko-KR') : '알 수 없음';
-      metaEl.textContent = `${generated} 기준 · 표지 ${allSigns.length.toLocaleString('ko-KR')}건 · 오프라인 사용 가능`;
+      const where = staticData.coverage?.routes?.length ? ` · 수록 구간: ${staticData.coverage.routes.join('·')}` : '';
+      metaEl.textContent = `${generated} 기준 · 표지 ${allSigns.length.toLocaleString('ko-KR')}건${where} · 오프라인 사용 가능`;
       return;
     }
 

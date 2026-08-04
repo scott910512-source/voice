@@ -64,20 +64,60 @@ async function fetchData() {
     console.log('       lib/normalize.js의 PARKING_RULES 키워드를 맞춰야 합니다.');
   }
 
+  const coverage = summarizeCoverage(signs);
+  console.log('');
+  console.log('── 데이터가 포함하는 범위 ─────────────────────');
+  console.log(`노선   : ${coverage.routes.join(', ') || '없음'}`);
+  console.log(`읍면동 : ${coverage.areas.join(', ') || '없음'}`);
+  if (coverage.bounds) {
+    console.log(
+      `좌표   : 위도 ${coverage.bounds.minLat}~${coverage.bounds.maxLat} / 경도 ${coverage.bounds.minLng}~${coverage.bounds.maxLng}`
+    );
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     source: `${config.endpoint}/${config.operation}`,
     meta: {
       totalCount: result.totalCount,
       fetchedCount: result.fetchedCount,
+      uniqueCount: result.uniqueCount,
       truncated: result.truncated,
       format: result.format,
       mappable,
       counts,
+      notes: result.notes,
     },
+    coverage,
     fields: summarizeSchema(result.items),
     signs,
   };
+}
+
+/**
+ * 이 데이터가 실제로 어디를 담고 있는지 요약한다.
+ * 주소를 검색했는데 아무것도 안 나올 때, 표지가 없는 것인지
+ * 데이터에 그 동네가 아예 없는 것인지 구분해 주기 위한 것이다.
+ */
+function summarizeCoverage(signs) {
+  const mapped = signs.filter((s) => s.mappable);
+  const routes = [...new Set(signs.map((s) => s.route || s.raw.roadRouteNm).filter(Boolean))];
+  const areas = [
+    ...new Set(
+      signs
+        .map((s) => String(s.address || '').match(/세종특별자치시\s*([가-힣]+(?:동|면|리|읍))/)?.[1])
+        .filter(Boolean)
+    ),
+  ];
+  const bounds = mapped.length
+    ? {
+        minLat: Number(Math.min(...mapped.map((s) => s.lat)).toFixed(6)),
+        maxLat: Number(Math.max(...mapped.map((s) => s.lat)).toFixed(6)),
+        minLng: Number(Math.min(...mapped.map((s) => s.lng)).toFixed(6)),
+        maxLng: Number(Math.max(...mapped.map((s) => s.lng)).toFixed(6)),
+      }
+    : null;
+  return { routes, areas, bounds };
 }
 
 module.exports = { fetchData };

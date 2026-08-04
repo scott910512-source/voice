@@ -131,7 +131,9 @@ function startMockServer(mode, serverPageCap) {
       // 실제 세종시 API는 numOfRows를 무시하고 페이지당 고정 건수만 돌려준다.
       const numOfRows = serverPageCap ? Math.min(requested, serverPageCap) : requested;
       const type = url.searchParams.get('type');
-      const slice = MOCK_ITEMS.slice((pageNo - 1) * numOfRows, pageNo * numOfRows);
+      // 페이징이 동작하지 않고 늘 1페이지만 돌려주는 서버.
+      const effectivePage = mode === 'sameEveryPage' ? 1 : pageNo;
+      const slice = MOCK_ITEMS.slice((effectivePage - 1) * numOfRows, effectivePage * numOfRows);
 
       // 뒤쪽 페이지에서 서버가 죽는 상황. 실제로 이 API에서 관측됐다.
       if (mode === 'failAfterFirst' && pageNo > 1) {
@@ -224,6 +226,32 @@ test('numOfRows를 무시하고 적게 주는 API에서도 전체를 모은다',
   assert.strictEqual(result.fetchedCount, 5, `기대 5건, 실제 ${result.fetchedCount}건`);
   assert.strictEqual(result.pageSize, 2);
   assert.strictEqual(signs.length, 5);
+});
+
+test('페이징이 동작하지 않는 API에서 중복을 걸러낸다', async () => {
+  // 실제 세종시 API의 동작. pageNo를 올려도 같은 레코드가 다시 온다.
+  const server = await startMockServer('sameEveryPage', 2);
+  const { port } = server.address();
+  try {
+    const result = await fetchAll({
+      endpoint: `http://127.0.0.1:${port}/mock`,
+      operation: 'sj_00000270',
+      serviceKey: 'k',
+      numOfRows: 500,
+      maxRecords: 1000,
+      maxPages: 60,
+      deadlineMs: 30000,
+      timeoutMs: 5000,
+      retries: 0,
+      extraParams: {},
+    });
+    assert.strictEqual(result.uniqueCount, 2, `기대 고유 2건, 실제 ${result.uniqueCount}건`);
+    assert.strictEqual(result.items.length, 2);
+    assert.strictEqual(result.truncated, true);
+    assert.ok(result.notes.some((n) => n.includes('서버 페이징 미동작')), `메모 없음: ${result.notes}`);
+  } finally {
+    server.close();
+  }
 });
 
 test('뒤쪽 페이지가 실패해도 앞에서 받은 것은 살린다', async () => {
