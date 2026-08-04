@@ -13,9 +13,16 @@
         height: 100%;
         margin: 0;
       }
+      /*
+        공용 style.css 가 body 를 flex 로 잡아 둔다. 그 안에서 이 그리드는
+        내용 너비만큼만 잡혀 지도 칸(1fr)이 0이 된다. 폭을 명시해야 한다.
+      */
       .three-d {
         display: grid;
-        grid-template-columns: 320px 1fr;
+        grid-template-columns: 320px minmax(0, 1fr);
+        width: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
         height: 100vh;
       }
       #vmap {
@@ -139,6 +146,14 @@
             <option value="-90">수직 내려보기</option>
             <option value="-45" selected>비스듬히 (45°)</option>
             <option value="-20">낮게 (20°)</option>
+          </select>
+        </div>
+
+        <div class="three-d__field">
+          <label for="layer">배경</label>
+          <select id="layer">
+            <option value="base">일반 지도</option>
+            <option value="satellite">위성 영상</option>
           </select>
         </div>
 

@@ -78,6 +78,8 @@ function writeServiceWorker(version) {
     'icons/icon-512.png',
     'vendor/leaflet/leaflet.js',
     'vendor/leaflet/leaflet.css',
+    '3d.html',
+    '3d.js',
   ];
 
   const sw = `/* 자동 생성 파일. scripts/build-static.js 가 만든다. */

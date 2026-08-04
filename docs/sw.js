@@ -12,7 +12,9 @@ const ASSETS = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "vendor/leaflet/leaflet.js",
-  "vendor/leaflet/leaflet.css"
+  "vendor/leaflet/leaflet.css",
+  "3d.html",
+  "3d.js"
 ];
 
 self.addEventListener('install', (event) => {
