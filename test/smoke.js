@@ -13,6 +13,7 @@ const assert = require('assert');
 const { parseXml } = require('../lib/xml');
 const { classifyParking, extractCoordinates, normalizeRecords } = require('../lib/normalize');
 const { encodeServiceKey, extractItems, parseBody, fetchAll } = require('../lib/api');
+const { parseLatLng, distanceMeters, isInSejong } = require('../lib/geocode');
 
 const tests = [];
 function test(name, fn) {
@@ -209,6 +210,47 @@ test('페이지가 나뉘어도 전체를 모은다', async () => {
 test('JSON 본문 판별이 형식을 올바르게 구분한다', () => {
   assert.strictEqual(parseBody('{"a":1}').format, 'json');
   assert.strictEqual(parseBody('<a><b>1</b></a>').format, 'xml');
+});
+
+/* --------------------------------------------------------- 위치 기반 조회 */
+
+test('좌표를 직접 입력하면 지오코딩 없이 인식한다', () => {
+  assert.deepStrictEqual(pick(parseLatLng('36.4801, 127.2890')), { lat: 36.4801, lng: 127.289 });
+  assert.deepStrictEqual(pick(parseLatLng('36.4801 127.2890')), { lat: 36.4801, lng: 127.289 });
+  assert.strictEqual(parseLatLng('세종시 연동면 명학산단로 110-5'), null);
+});
+
+test('경도/위도 순서로 입력해도 교정한다', () => {
+  assert.deepStrictEqual(pick(parseLatLng('127.2890, 36.4801')), { lat: 36.4801, lng: 127.289 });
+});
+
+test('거리 계산이 실제 거리와 맞는다', () => {
+  // 위도 1도 ≈ 111km. 0.001도면 약 111m.
+  const meters = distanceMeters({ lat: 36.48, lng: 127.289 }, { lat: 36.481, lng: 127.289 });
+  assert.ok(Math.abs(meters - 111) < 2, `기대 ~111m, 실제 ${meters}m`);
+  assert.strictEqual(Math.round(distanceMeters({ lat: 36.48, lng: 127.289 }, { lat: 36.48, lng: 127.289 })), 0);
+});
+
+test('세종시 범위 판정', () => {
+  assert.strictEqual(isInSejong({ lat: 36.48, lng: 127.289 }), true);
+  assert.strictEqual(isInSejong({ lat: 37.5665, lng: 126.978 }), false);
+});
+
+test('반경 안의 표지만 거리순으로 남긴다', () => {
+  const center = { lat: 36.4801, lng: 127.289 };
+  const signs = normalizeRecords([
+    { 표지명: '주차금지', 위도: '36.4801', 경도: '127.2890' }, // 0m
+    { 표지명: '주차금지', 위도: '36.4810', 경도: '127.2890' }, // 약 100m
+    { 표지명: '노상주차장', 위도: '36.5041', 경도: '127.2617' }, // 수 km
+  ]);
+  const nearby = signs
+    .map((s) => ({ ...s, distance: Math.round(distanceMeters(center, s)) }))
+    .filter((s) => s.distance <= 500)
+    .sort((a, b) => a.distance - b.distance);
+
+  assert.strictEqual(nearby.length, 2);
+  assert.strictEqual(nearby[0].distance, 0);
+  assert.ok(nearby[1].distance > 90 && nearby[1].distance < 120);
 });
 
 /* ---------------------------------------------------------------- 실행 */

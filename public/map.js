@@ -88,6 +88,33 @@
       onIdle(fn) {
         maps.Event.addListener(map, 'idle', fn);
       },
+      setFocusArea(center, radius) {
+        if (this.__focus) this.__focus.forEach((o) => o.setMap(null));
+        if (!center) {
+          this.__focus = null;
+          return;
+        }
+        const position = new maps.LatLng(center.lat, center.lng);
+        const pin = new maps.Marker({
+          position,
+          map,
+          icon: { content: '<div class="center-pin"></div>', anchor: new maps.Point(8, 8) },
+          zIndex: 1000,
+        });
+        const circle = new maps.Circle({
+          map,
+          center: position,
+          radius,
+          strokeColor: '#2563eb',
+          strokeOpacity: 0.7,
+          strokeWeight: 1,
+          fillColor: '#2563eb',
+          fillOpacity: 0.07,
+        });
+        this.__focus = [pin, circle];
+        map.setCenter(position);
+        map.setZoom(radius <= 300 ? 17 : radius <= 700 ? 16 : radius <= 1200 ? 15 : 14);
+      },
       getBounds() {
         const b = map.getBounds();
         return [b.minX(), b.minY(), b.maxX(), b.maxY()];
@@ -139,6 +166,31 @@
       },
       onIdle(fn) {
         maps.event.addListener(map, 'idle', fn);
+      },
+      setFocusArea(center, radius) {
+        if (this.__focus) this.__focus.forEach((o) => o.setMap(null));
+        if (!center) {
+          this.__focus = null;
+          return;
+        }
+        const position = new maps.LatLng(center.lat, center.lng);
+        const el = document.createElement('div');
+        el.innerHTML = '<div class="center-pin"></div>';
+        const pin = new maps.CustomOverlay({ position, content: el, yAnchor: 0.5, xAnchor: 0.5, zIndex: 10 });
+        pin.setMap(map);
+        const circle = new maps.Circle({
+          center: position,
+          radius,
+          strokeWeight: 1,
+          strokeColor: '#2563eb',
+          strokeOpacity: 0.7,
+          fillColor: '#2563eb',
+          fillOpacity: 0.07,
+        });
+        circle.setMap(map);
+        this.__focus = [pin, circle];
+        map.setCenter(position);
+        map.setLevel(radius <= 300 ? 2 : radius <= 700 ? 3 : radius <= 1200 ? 4 : 5);
       },
       getBounds() {
         const b = map.getBounds();
@@ -202,6 +254,27 @@
       },
       onIdle(fn) {
         map.on('moveend zoomend', fn);
+      },
+      setFocusArea(center, radius) {
+        if (this.__focus) this.__focus.forEach((o) => map.removeLayer(o));
+        if (!center) {
+          this.__focus = null;
+          return;
+        }
+        const pin = L.marker([center.lat, center.lng], {
+          icon: L.divIcon({ html: '<div class="center-pin"></div>', className: '', iconSize: [16, 16], iconAnchor: [8, 8] }),
+          zIndexOffset: 1000,
+        }).addTo(map);
+        const circle = L.circle([center.lat, center.lng], {
+          radius,
+          color: '#2563eb',
+          weight: 1,
+          opacity: 0.7,
+          fillColor: '#2563eb',
+          fillOpacity: 0.07,
+        }).addTo(map);
+        this.__focus = [pin, circle];
+        map.fitBounds(circle.getBounds(), { padding: [30, 30] });
       },
       getBounds() {
         const b = map.getBounds();

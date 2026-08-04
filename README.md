@@ -8,13 +8,30 @@
 
 ## 실행
 
+가장 쉬운 방법은 운영체제에 맞는 파일을 **더블클릭**하는 것입니다. 브라우저까지 자동으로 열립니다.
+
+- Windows: `start.bat`
+- macOS / Linux: `start.command`
+
+터미널을 쓴다면:
+
 ```bash
-cp .env.example .env      # 인증키·지도 키 설정 (인증키는 기본값이 이미 들어 있습니다)
 npm start                 # http://localhost:3000
 npm test                  # 오프라인 검증 (목 서버로 전 구간 테스트)
 ```
 
-Node.js 18 이상이면 됩니다. 런타임 의존성이 없어 `npm install` 없이 바로 실행됩니다.
+Node.js 18 이상이면 됩니다. 런타임 의존성이 없어 `npm install` 없이 바로 실행됩니다. 인증키는 기본값이 들어 있어 그대로도 동작하고, 바꾸려면 `cp .env.example .env` 후 편집하세요.
+
+### 서버가 안 열릴 때
+
+| 증상 | 원인과 해결 |
+| --- | --- |
+| `node: command not found` / "Node.js가 설치되어 있지 않습니다" | [nodejs.org](https://nodejs.org)에서 LTS를 설치한 뒤 다시 실행 |
+| 창이 떴다가 바로 닫힘 | `start.bat`/`start.command`로 실행하면 오류 메시지가 남습니다 |
+| `EADDRINUSE` | 3000번 포트를 다른 프로그램이 쓰는 중입니다. `PORT=3100 npm start` |
+| 브라우저에 아무것도 안 뜸 | 주소가 `http://localhost:3000` 인지 확인 (https 아님) |
+| 화면은 뜨는데 "데이터를 불러오지 못했습니다" | 사내망/방화벽에서 `apis.data.go.kr:443` 허용 필요. `/api/probe`로 원인 확인 |
+| 지도 배경이 회색 | 지도 타일이 차단된 환경입니다. `.env`에 네이버·카카오·VWorld 키 중 하나를 넣으세요 |
 
 ## 지도
 
@@ -55,11 +72,22 @@ Leaflet은 `public/vendor/leaflet/`에 포함해 두었습니다. 사내망·폐
 | 경로 | 설명 |
 | --- | --- |
 | `GET /api/signs` | 정규화·분류된 표지 목록. `category`, `q`, `bbox`, `mappableOnly`, `refresh=1` 지원 |
+| `GET /api/near` | 특정 주소 주변 표지를 거리순으로. `address`, `radius`(m), `category` 지원 |
 | `GET /api/schema` | **원본 응답에 실제로 어떤 필드가 오는지** 요약 (필드명·샘플값·좌표 인식 결과) |
 | `GET /api/probe` | 1페이지 원본 응답 그대로 확인 (인증키는 가려서 표시) |
 | `GET /api/config` | 프런트엔드가 쓸 지도 공급자 정보 |
 
 `bbox`는 `minLng,minLat,maxLng,maxLat` 형식입니다.
+
+## 위치로 찾기
+
+왼쪽 위 검색창에 도로명주소를 넣고 반경을 고르면, 그 주변 주차 표지를 **가까운 순서로** 보여주고 지도에 반경 원을 그립니다. 기본값은 `세종특별자치시 연동면 명학산단로 110-5` / 반경 500m이며 `.env`의 `DEFAULT_ADDRESS`, `DEFAULT_RADIUS_M`으로 바꿉니다.
+
+주소 검색은 `VWORLD_KEY` → `KAKAO_REST_KEY` → 네이버(`NAVER_MAP_CLIENT_ID` + `NAVER_MAP_CLIENT_SECRET`) → OSM Nominatim 순으로 시도합니다. 키가 없으면 국내 도로명 정확도가 떨어지므로, 그럴 때는 검색창에 **`36.4801, 127.2890` 처럼 좌표를 직접 입력**해도 됩니다. 지오코딩 없이 바로 인식합니다.
+
+```bash
+curl "http://localhost:3000/api/near?address=세종특별자치시 연동면 명학산단로 110-5&radius=500"
+```
 
 ### 데이터가 비어 보일 때
 
@@ -81,6 +109,8 @@ config.js              환경변수/.env 설정
 lib/api.js             공공데이터 호출, 페이지 순회, JSON↔XML 자동 폴백
 lib/xml.js             의존성 없는 최소 XML 파서
 lib/normalize.js       좌표 탐지 · 주차 분류 · 스키마 요약
+lib/geocode.js         주소→좌표 변환 · 거리 계산
+start.bat / start.command  더블클릭 실행 스크립트
 public/                지도 화면 (index.html, app.js, map.js, style.css)
 public/vendor/leaflet  로컬 포함 Leaflet (폐쇄망 대응)
 test/smoke.js          목 서버 기반 오프라인 검증

@@ -18,8 +18,16 @@
   const detailBadgeEl = document.getElementById('detail-badge');
   const detailFieldsEl = document.getElementById('detail-fields');
 
+  const addressEl = document.getElementById('address');
+  const radiusEl = document.getElementById('radius');
+  const locateEl = document.getElementById('locate');
+  const clearLocateEl = document.getElementById('clear-locate');
+  const locateResultEl = document.getElementById('locate-result');
+
   let mapAdapter = null;
   let allSigns = [];
+  // 위치 기반 조회 중이면 여기에 결과가 들어가고, 목록/지도는 이 결과만 보여준다.
+  let nearbyResult = null;
 
   function setStatus(text, tone) {
     statusEl.textContent = text;
@@ -38,7 +46,8 @@
   function visibleSigns() {
     const categories = activeCategories();
     const query = queryEl.value.trim().toLowerCase();
-    return allSigns.filter((sign) => {
+    const source = nearbyResult ? nearbyResult.signs : allSigns;
+    return source.filter((sign) => {
       if (!categories.includes(sign.parking.category)) return false;
       if (!query) return true;
       return JSON.stringify(sign.raw).toLowerCase().includes(query);
@@ -67,7 +76,15 @@
 
       const title = document.createElement('p');
       title.className = 'result__title';
-      title.textContent = signTitle(sign);
+      const titleText = document.createElement('span');
+      titleText.textContent = signTitle(sign);
+      title.appendChild(titleText);
+      if (typeof sign.distance === 'number') {
+        const distance = document.createElement('span');
+        distance.className = 'result__distance';
+        distance.textContent = sign.distance >= 1000 ? `${(sign.distance / 1000).toFixed(1)}km` : `${sign.distance}m`;
+        title.appendChild(distance);
+      }
 
       const meta = document.createElement('p');
       meta.className = 'result__meta';
@@ -121,7 +138,68 @@
     const signs = visibleSigns();
     renderList(signs);
     if (mapAdapter) mapAdapter.setMarkers(signs);
+
+    if (nearbyResult) {
+      const radiusText = nearbyResult.radius >= 1000 ? `${nearbyResult.radius / 1000}km` : `${nearbyResult.radius}m`;
+      setStatus(`반경 ${radiusText} 안 ${signs.length.toLocaleString('ko-KR')}건 (전체 ${allSigns.length.toLocaleString('ko-KR')}건 중)`);
+      return;
+    }
     setStatus(`${signs.length.toLocaleString('ko-KR')}건 표시 중 (전체 ${allSigns.length.toLocaleString('ko-KR')}건)`);
+  }
+
+  function summarizeNearby(result) {
+    const labels = [
+      ['parking_allowed', '주차 가능'],
+      ['no_park', '주차 금지'],
+      ['no_stop_no_park', '정차·주차 금지'],
+    ];
+    const parts = labels
+      .filter(([key]) => result.counts[key] > 0)
+      .map(([key, label]) => `${label} ${result.counts[key]}건`);
+    return parts.length ? parts.join(' · ') : '주차 관련 표지 없음';
+  }
+
+  async function locate() {
+    const address = addressEl.value.trim();
+    if (!address) return;
+
+    locateResultEl.textContent = '위치를 찾는 중…';
+    delete locateResultEl.dataset.tone;
+    locateEl.disabled = true;
+
+    try {
+      const params = new URLSearchParams({ address, radius: radiusEl.value });
+      const response = await fetch(`/api/near?${params}`);
+      const payload = await response.json();
+
+      if (!payload.ok) throw new Error(payload.error || '조회에 실패했습니다.');
+
+      nearbyResult = payload;
+      clearLocateEl.hidden = false;
+      if (mapAdapter) mapAdapter.setFocusArea(payload.center, payload.radius);
+
+      const matched = payload.center.matched || address;
+      locateResultEl.textContent = payload.warning
+        ? payload.warning
+        : `${matched} 기준 · ${summarizeNearby(payload)}`;
+      if (payload.warning) locateResultEl.dataset.tone = 'error';
+
+      refreshView();
+    } catch (error) {
+      locateResultEl.textContent = error.message;
+      locateResultEl.dataset.tone = 'error';
+    } finally {
+      locateEl.disabled = false;
+    }
+  }
+
+  function clearLocate() {
+    nearbyResult = null;
+    clearLocateEl.hidden = true;
+    locateResultEl.textContent = '';
+    delete locateResultEl.dataset.tone;
+    if (mapAdapter) mapAdapter.setFocusArea(null);
+    refreshView();
   }
 
   async function loadSigns({ force = false } = {}) {
@@ -156,14 +234,14 @@
   }
 
   async function init() {
-    let mapConfig = { naverClientId: '', kakaoJsKey: '', vworldKey: '' };
+    let serverConfig = { map: { naverClientId: '', kakaoJsKey: '', vworldKey: '' } };
     try {
       const response = await fetch('/api/config');
-      const payload = await response.json();
-      mapConfig = payload.map;
+      serverConfig = await response.json();
     } catch (_) {
-      /* 지도 키 조회 실패 시 기본 타일로 진행한다. */
+      /* 설정 조회 실패 시 기본 타일로 진행한다. */
     }
+    const mapConfig = serverConfig.map;
 
     try {
       mapAdapter = await window.SejongMap.create(document.getElementById('map'), mapConfig);
@@ -172,9 +250,20 @@
       setStatus(`지도를 초기화하지 못했습니다: ${error.message}`, 'error');
     }
 
+    if (serverConfig.defaultAddress) addressEl.value = serverConfig.defaultAddress;
+    if (serverConfig.defaultRadius) radiusEl.value = String(serverConfig.defaultRadius);
+
     document.querySelectorAll('.filters input').forEach((el) => el.addEventListener('change', refreshView));
     queryEl.addEventListener('input', debounce(refreshView, 200));
     refreshEl.addEventListener('click', () => loadSigns({ force: true }));
+    locateEl.addEventListener('click', locate);
+    clearLocateEl.addEventListener('click', clearLocate);
+    addressEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') locate();
+    });
+    radiusEl.addEventListener('change', () => {
+      if (nearbyResult) locate();
+    });
     detailEl.querySelector('.detail__close').addEventListener('click', () => {
       detailEl.hidden = true;
     });

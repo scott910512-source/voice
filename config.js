@@ -54,6 +54,16 @@ const config = {
     // 국토교통부 VWorld 인증키. 위 둘이 없을 때 국내 배경지도 타일로 사용한다.
     vworldKey: process.env.VWORLD_KEY || '',
   },
+  geocode: {
+    // 주소 검색용 키. 지도 키와 종류가 다르다(카카오는 REST 키, 네이버는 Secret 필요).
+    vworldKey: process.env.VWORLD_KEY || '',
+    kakaoRestKey: process.env.KAKAO_REST_KEY || '',
+    naverClientId: process.env.NAVER_MAP_CLIENT_ID || '',
+    naverClientSecret: process.env.NAVER_MAP_CLIENT_SECRET || '',
+  },
+  // 화면을 처음 열었을 때 중심이 될 위치.
+  defaultAddress: process.env.DEFAULT_ADDRESS || '세종특별자치시 연동면 명학산단로 110-5',
+  defaultRadius: intFromEnv('DEFAULT_RADIUS_M', 500),
 };
 
 module.exports = config;

@@ -8,6 +8,7 @@ const { URL } = require('url');
 const config = require('./config');
 const { fetchAll, fetchPage, buildUrl } = require('./lib/api');
 const { normalizeRecords, summarizeSchema, SEJONG_BOUNDS } = require('./lib/normalize');
+const { geocode, distanceMeters, isInSejong } = require('./lib/geocode');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MIME = {
@@ -107,6 +108,41 @@ async function handleSigns(req, res, url) {
   });
 }
 
+/** 특정 주소 주변의 주차 표지를 거리순으로 돌려준다. */
+async function handleNear(req, res, url) {
+  const address = (url.searchParams.get('address') || config.defaultAddress).trim();
+  const radius = Number(url.searchParams.get('radius')) || config.defaultRadius;
+  const categories = (url.searchParams.get('category') || '')
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+
+  const center = await geocode(address, config.geocode);
+  const data = await loadSigns({});
+
+  let signs = data.signs.filter((s) => s.mappable);
+  if (categories.length) signs = signs.filter((s) => categories.includes(s.parking.category));
+
+  const nearby = signs
+    .map((sign) => ({ ...sign, distance: Math.round(distanceMeters(center, sign)) }))
+    .filter((sign) => sign.distance <= radius)
+    .sort((a, b) => a.distance - b.distance);
+
+  const counts = { no_stop_no_park: 0, no_park: 0, parking_allowed: 0, other: 0 };
+  nearby.forEach((s) => (counts[s.parking.category] += 1));
+
+  json(res, 200, {
+    ok: true,
+    center,
+    radius,
+    // 세종시 밖으로 지오코딩되면 결과가 0건이 나오는데, 원인을 알 수 있게 알려준다.
+    warning: isInSejong(center) ? null : '검색된 좌표가 세종특별자치시 범위 밖입니다. 주소를 다시 확인하세요.',
+    counts,
+    total: nearby.length,
+    signs: nearby,
+  });
+}
+
 async function handleSchema(req, res) {
   const data = await loadSigns({});
   const unmapped = data.signs.filter((s) => !s.mappable);
@@ -159,6 +195,8 @@ function handleConfig(req, res) {
       kakaoJsKey: config.map.kakaoJsKey,
       vworldKey: config.map.vworldKey,
     },
+    defaultAddress: config.defaultAddress,
+    defaultRadius: config.defaultRadius,
     bounds: SEJONG_BOUNDS,
   });
 }
@@ -184,6 +222,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
     if (url.pathname === '/api/signs') return await handleSigns(req, res, url);
+    if (url.pathname === '/api/near') return await handleNear(req, res, url);
     if (url.pathname === '/api/schema') return await handleSchema(req, res);
     if (url.pathname === '/api/probe') return await handleProbe(req, res);
     if (url.pathname === '/api/config') return handleConfig(req, res);

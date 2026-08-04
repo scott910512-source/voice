@@ -13,6 +13,28 @@
         <p class="panel__sub">세종특별자치시 도로안전표지 공공데이터 기반</p>
       </header>
 
+      <section class="locate">
+        <label class="locate__label" for="address">위치로 찾기</label>
+        <input
+          id="address"
+          type="search"
+          placeholder="도로명주소 또는 '위도, 경도'"
+          value="세종특별자치시 연동면 명학산단로 110-5"
+          autocomplete="off"
+        />
+        <div class="locate__row">
+          <select id="radius">
+            <option value="200">반경 200m</option>
+            <option value="500" selected>반경 500m</option>
+            <option value="1000">반경 1km</option>
+            <option value="2000">반경 2km</option>
+          </select>
+          <button id="locate" type="button">주변 조회</button>
+          <button id="clear-locate" type="button" class="ghost" hidden>전체 보기</button>
+        </div>
+        <p id="locate-result" class="locate__result"></p>
+      </section>
+
       <section class="filters">
         <label class="filter filter--allowed">
           <input type="checkbox" data-category="parking_allowed" checked />
