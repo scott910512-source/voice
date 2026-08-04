@@ -80,6 +80,8 @@ function writeServiceWorker(version) {
     'vendor/leaflet/leaflet.css',
     '3d.html',
     '3d.js',
+    'vendor/maplibre/maplibre-gl.js',
+    'vendor/maplibre/maplibre-gl.css',
   ];
 
   const sw = `/* 자동 생성 파일. scripts/build-static.js 가 만든다. */

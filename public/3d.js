@@ -25,6 +25,7 @@
   const tiltEl = document.getElementById('tilt');
   const goEl = document.getElementById('go');
   const layerEl = document.getElementById('layer');
+  const buildingsEl = document.getElementById('buildings');
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
   let vworldKey = '';
@@ -183,6 +184,71 @@
     return `https://api.vworld.kr/req/wmts/1.0.0/${vworldKey}/${layer}/{z}/{y}/{x}.${ext}`;
   }
 
+  /* ------------------------------------------------------------ 건물 3D */
+
+  /**
+   * 건물을 세우려면 건물 외곽선과 높이가 필요한데 VWorld 배경지도 타일은
+   * 그림일 뿐이라 그 정보가 없다. VWorld 3D가 막혀 있으므로 OpenStreetMap
+   * 건물 데이터를 Overpass로 받아 직접 세운다. 인증키가 필요 없다.
+   *
+   * 다만 OSM 건물은 도심 위주로 채워져 있어, 산업단지나 시골은 비어 있을 수
+   * 있다. 그래서 몇 동을 세웠는지 화면에 알려 준다.
+   */
+  const OVERPASS = 'https://overpass-api.de/api/interpreter';
+
+  function buildingHeight(tags) {
+    const direct = parseFloat(String(tags.height || '').replace(/[^\d.]/g, ''));
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const levels = parseFloat(tags['building:levels']);
+    if (Number.isFinite(levels) && levels > 0) return levels * 3;
+    return 6; // 태그가 없으면 2층 정도로 본다.
+  }
+
+  function toGeoJson(elements) {
+    const features = [];
+    for (const el of elements) {
+      // way 는 geometry 를 그대로, relation 은 outer 링만 쓴다.
+      const rings =
+        el.type === 'way' && Array.isArray(el.geometry)
+          ? [el.geometry]
+          : el.type === 'relation' && Array.isArray(el.members)
+            ? el.members.filter((m) => m.role === 'outer' && Array.isArray(m.geometry)).map((m) => m.geometry)
+            : [];
+
+      for (const ring of rings) {
+        if (!ring || ring.length < 4) continue;
+        const coords = ring.map((p) => [p.lon, p.lat]);
+        // 폴리곤은 첫 점과 끝 점이 같아야 한다.
+        if (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1]) {
+          coords.push(coords[0]);
+        }
+        features.push({
+          type: 'Feature',
+          properties: { height: buildingHeight(el.tags || {}) },
+          geometry: { type: 'Polygon', coordinates: [coords] },
+        });
+      }
+    }
+    return { type: 'FeatureCollection', features };
+  }
+
+  async function fetchBuildings(point, radiusM) {
+    const query =
+      `[out:json][timeout:25];(` +
+      `way["building"](around:${radiusM},${point.lat},${point.lng});` +
+      `relation["building"](around:${radiusM},${point.lat},${point.lng});` +
+      `);out geom ${1500};`;
+
+    const response = await fetch(OVERPASS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: query,
+    });
+    if (!response.ok) throw new Error(`건물 데이터 조회 실패 (HTTP ${response.status})`);
+    const data = await response.json();
+    return toGeoJson(data.elements || []);
+  }
+
   function styleFor(kind) {
     return {
       version: 8,
@@ -217,26 +283,91 @@
 
     const marker = new maplibregl.Marker({ color: '#dc2626' }).setLngLat([point.lng, point.lat]).addTo(map);
 
-    if (layerEl) {
-      layerEl.addEventListener('change', () => map.setStyle(styleFor(layerEl.value)));
+    let buildingCount = null;
+
+    /** 배경을 바꾸면 스타일이 새로 깔리므로 건물 레이어를 다시 얹어야 한다. */
+    function addBuildingLayer(geojson) {
+      if (map.getLayer('buildings-3d')) map.removeLayer('buildings-3d');
+      if (map.getSource('buildings')) map.removeSource('buildings');
+      map.addSource('buildings', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'buildings-3d',
+        type: 'fill-extrusion',
+        source: 'buildings',
+        paint: {
+          'fill-extrusion-color': '#b9c4d4',
+          'fill-extrusion-height': ['get', 'height'],
+          'fill-extrusion-base': 0,
+          'fill-extrusion-opacity': 0.9,
+          'fill-extrusion-vertical-gradient': true,
+        },
+      });
     }
+
+    let lastGeoJson = null;
+
+    async function loadBuildings(at) {
+      if (!buildingsEl || !buildingsEl.checked) {
+        if (map.getLayer('buildings-3d')) map.removeLayer('buildings-3d');
+        return;
+      }
+      try {
+        setStatus('건물 데이터를 받는 중…');
+        const geojson = await fetchBuildings(at, 700);
+        lastGeoJson = geojson;
+        buildingCount = geojson.features.length;
+        if (buildingCount) addBuildingLayer(geojson);
+        describe(at);
+      } catch (error) {
+        buildingCount = null;
+        setStatus(`건물 데이터를 받지 못했습니다.\n${error.message}`, 'error');
+      }
+    }
+
+    function describe(at) {
+      const buildings =
+        buildingCount === null
+          ? ''
+          : buildingCount === 0
+            ? '이 주변은 OpenStreetMap에 등록된 건물이 없어 세울 것이 없습니다.'
+            : `건물 ${buildingCount.toLocaleString('ko-KR')}동을 세웠습니다.`;
+      setStatus([`${placeEl.value}`, buildings].filter(Boolean).join('\n'), 'ok');
+      diag([
+        '방식: MapLibre + VWorld 타일 + OSM 건물',
+        `이유: ${reason}`,
+        `좌표: ${at.lat}, ${at.lng}`,
+        buildingCount === null ? '' : `건물: ${buildingCount}동 (반경 700m)`,
+        '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
+      ]);
+    }
+
+    if (layerEl) {
+      layerEl.addEventListener('change', () => {
+        map.setStyle(styleFor(layerEl.value));
+        map.once('styledata', () => {
+          if (lastGeoJson && buildingsEl && buildingsEl.checked) addBuildingLayer(lastGeoJson);
+        });
+      });
+    }
+    if (buildingsEl) {
+      buildingsEl.addEventListener('change', () => loadBuildings(currentPoint));
+    }
+
+    let currentPoint = point;
 
     engine = {
       kind: 'maplibre',
       moveTo(next, nextTilt) {
+        currentPoint = next;
         marker.setLngLat([next.lng, next.lat]);
         map.easeTo({ center: [next.lng, next.lat], pitch: pitchFrom(nextTilt), zoom: 16.5, duration: 800 });
+        loadBuildings(next);
         return true;
       },
     };
 
-    setStatus(`VWorld 지도를 기울여 보는 중입니다.\n${placeEl.value}`, 'ok');
-    diag([
-      `방식: MapLibre + VWorld 타일`,
-      `이유: ${reason}`,
-      `좌표: ${point.lat}, ${point.lng}`,
-      '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
-    ]);
+    describe(point);
+    map.once('load', () => loadBuildings(point));
   }
 
   /** VWorld 3D의 tilt(-90~0)를 MapLibre의 pitch(0~85)로 옮긴다. */

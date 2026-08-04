@@ -14,7 +14,9 @@ const ASSETS = [
   "vendor/leaflet/leaflet.js",
   "vendor/leaflet/leaflet.css",
   "3d.html",
-  "3d.js"
+  "3d.js",
+  "vendor/maplibre/maplibre-gl.js",
+  "vendor/maplibre/maplibre-gl.css"
 ];
 
 self.addEventListener('install', (event) => {
