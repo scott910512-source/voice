@@ -124,12 +124,22 @@
       }
 
       .legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px 10px;
+        display: grid;
+        gap: 8px;
         margin: 0 0 12px;
         font-size: 11.5px;
         color: var(--muted);
+      }
+      .legend__group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px 9px;
+        align-items: center;
+      }
+      .legend__group b {
+        font-size: 11px;
+        color: var(--fg);
+        width: 100%;
       }
       .legend__item {
         display: inline-flex;
@@ -230,6 +240,7 @@
           <label><input id="buildings" type="checkbox" checked /> 건물 3D로 세우기</label>
           <label><input id="labels" type="checkbox" checked /> 상호·건물명 표시</label>
           <label><input id="zoning" type="checkbox" /> 용도지역 색으로 구분</label>
+          <label><input id="parcels" type="checkbox" /> 필지 · 공시지가</label>
         </div>
 
         <p id="legend" class="legend" hidden></p>

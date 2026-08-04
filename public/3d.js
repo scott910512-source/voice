@@ -29,6 +29,7 @@
   const sourceEl = document.getElementById('source');
   const to2dEl = document.getElementById('to-2d');
   const zoningEl = document.getElementById('zoning');
+  const parcelsEl = document.getElementById('parcels');
   const legendEl = document.getElementById('legend');
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
@@ -347,6 +348,94 @@
     return { failed: tried };
   }
 
+  /* ------------------------------------------------- 필지 · 공시지가 */
+
+  /**
+   * 연속지적도. 필지 경계에 PNU·지번·공시년도·공시지가가 함께 들어 있어,
+   * 한 번 받으면 경계와 땅값을 같이 보여줄 수 있다. 건물·용도지역과 같은
+   * VWorld 데이터 API라 인증키가 따로 필요 없다.
+   */
+  const VWORLD_PARCEL_LAYERS = ['LP_PA_CBND_BUBUN', 'LP_PA_CBND_BONBUN'];
+
+  const PRICE_FIELDS = ['jiga', 'pblntf_pclnd', 'pblntfpclnd', 'landprice', '공시지가'];
+  const JIBUN_FIELDS = ['jibun', 'addr', 'ldcode_nm', '지번'];
+  const AREA_FIELDS = ['lndpcl_ar', 'area', 'ar', '면적'];
+  const YEAR_FIELDS = ['jiga_year', 'stdr_year', 'base_year', '공시년도'];
+
+  /** 공시지가 구간별 색. 원/㎡ 기준. */
+  const PRICE_BREAKS = [
+    { max: 50000, label: '5만원 미만', color: '#fee8c8' },
+    { max: 150000, label: '5~15만원', color: '#fdbb84' },
+    { max: 500000, label: '15~50만원', color: '#fc8d59' },
+    { max: 1500000, label: '50~150만원', color: '#e34a33' },
+    { max: Infinity, label: '150만원 이상', color: '#b30000' },
+  ];
+
+  function priceStyle(value) {
+    if (!Number.isFinite(value) || value <= 0) return { label: '값 없음', color: '#cbd5e1' };
+    return PRICE_BREAKS.find((b) => value < b.max);
+  }
+
+  /** 원/㎡ 를 사람이 읽는 형태로. 국내 실무는 평당으로도 본다. */
+  function formatPrice(value) {
+    if (!Number.isFinite(value) || value <= 0) return '공시지가 없음';
+    const perPyeong = Math.round(value * 3.305785);
+    return `${value.toLocaleString('ko-KR')}원/㎡ (평당 ${perPyeong.toLocaleString('ko-KR')}원)`;
+  }
+
+  async function fetchParcels(point, radiusM) {
+    if (!vworldKey) return null;
+    const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
+    const domain = location.hostname || 'localhost';
+    const tried = [];
+
+    for (const layer of VWORLD_PARCEL_LAYERS) {
+      const url =
+        `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
+        `&size=1000&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
+        `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(domain)}`;
+      try {
+        const data = await jsonp(url, 12000);
+        const features = data?.response?.result?.featureCollection?.features;
+        if (!Array.isArray(features) || !features.length) {
+          tried.push(`${layer}: 결과 없음`);
+          continue;
+        }
+
+        const kinds = new Map();
+        let priced = 0;
+        const out = features.map((feature) => {
+          const props = feature.properties || {};
+          const price = Number(String(pickField(props, PRICE_FIELDS) ?? '').replace(/[^\d.]/g, ''));
+          const style = priceStyle(price);
+          if (Number.isFinite(price) && price > 0) priced += 1;
+          kinds.set(style.label, style.color);
+          return {
+            type: 'Feature',
+            properties: {
+              color: style.color,
+              price: Number.isFinite(price) ? price : 0,
+              jibun: String(pickField(props, JIBUN_FIELDS) ?? ''),
+              area: String(pickField(props, AREA_FIELDS) ?? ''),
+              year: String(pickField(props, YEAR_FIELDS) ?? ''),
+            },
+            geometry: feature.geometry,
+          };
+        });
+
+        // 범례는 금액 순서대로 보여야 읽힌다.
+        const ordered = new Map();
+        for (const b of PRICE_BREAKS) if (kinds.has(b.label)) ordered.set(b.label, b.color);
+        if (kinds.has('값 없음')) ordered.set('값 없음', '#cbd5e1');
+
+        return { geojson: { type: 'FeatureCollection', features: out }, layer, kinds: ordered, priced };
+      } catch (error) {
+        tried.push(`${layer}: ${error.message}`);
+      }
+    }
+    return { failed: tried };
+  }
+
   async function fetchVworldBuildings(point, radiusM) {
     if (!vworldKey) return null;
     const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
@@ -574,6 +663,9 @@
     let buildingSource = null;
     let nationalNote = '';
     let zoningNote = '';
+    let parcelNote = '';
+    let parcelKinds = null;
+    let zoningKinds = null;
     let labelMarkers = [];
 
     /**
@@ -597,6 +689,54 @@
     }
 
     let zoningGeoJson = null;
+    let parcelGeoJson = null;
+
+    /** 필지를 공시지가 구간별 색으로 깐다. 용도지역과 겹치면 아래에 둔다. */
+    function addParcelLayer(geojson) {
+      if (map.getLayer('parcel-fill')) map.removeLayer('parcel-fill');
+      if (map.getLayer('parcel-line')) map.removeLayer('parcel-line');
+      if (map.getSource('parcel')) map.removeSource('parcel');
+      if (!geojson) return;
+
+      map.addSource('parcel', { type: 'geojson', data: geojson });
+      const below = map.getLayer('zoning-fill') ? 'zoning-fill' : map.getLayer('buildings-3d') ? 'buildings-3d' : undefined;
+      map.addLayer(
+        { id: 'parcel-fill', type: 'fill', source: 'parcel', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 } },
+        below
+      );
+      map.addLayer(
+        {
+          id: 'parcel-line',
+          type: 'line',
+          source: 'parcel',
+          paint: { 'line-color': '#475569', 'line-width': 0.6, 'line-opacity': 0.7 },
+        },
+        below
+      );
+    }
+
+    async function loadParcels(at) {
+      if (!parcelsEl || !parcelsEl.checked) {
+        addParcelLayer(null);
+        parcelNote = '';
+        renderAllLegends();
+        return;
+      }
+      const result = await fetchParcels(at, 500);
+      if (result && result.geojson) {
+        parcelGeoJson = result.geojson;
+        addParcelLayer(parcelGeoJson);
+        parcelKinds = result.kinds;
+        parcelNote = `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (${result.layer})`;
+      } else {
+        parcelGeoJson = null;
+        parcelKinds = null;
+        addParcelLayer(null);
+        parcelNote = result && result.failed ? `필지 없음: ${result.failed.join(' / ')}` : '';
+      }
+      renderAllLegends();
+    }
+
 
     /** 용도지역을 반투명 면으로 깔고 범례를 만든다. 건물보다 아래에 둔다. */
     function addZoningLayer(geojson) {
@@ -628,29 +768,54 @@
       );
     }
 
-    function renderLegend(kinds) {
-      if (!legendEl) return;
-      legendEl.textContent = '';
-      if (!kinds || !kinds.size) {
-        legendEl.hidden = true;
-        return;
-      }
+    function legendGroup(title, kinds) {
+      if (!kinds || !kinds.size) return null;
+      const box = document.createElement('span');
+      box.className = 'legend__group';
+      const head = document.createElement('b');
+      head.textContent = title;
+      box.appendChild(head);
       for (const [label, color] of kinds) {
         const row = document.createElement('span');
         row.className = 'legend__item';
         const dot = document.createElement('i');
         dot.style.background = color;
         row.append(dot, document.createTextNode(label));
-        legendEl.appendChild(row);
+        box.appendChild(row);
       }
-      legendEl.hidden = false;
+      return box;
+    }
+
+    function renderAllLegends() {
+      if (!legendEl) return;
+      legendEl.textContent = '';
+      const groups = [legendGroup('공시지가', parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
+      groups.forEach((g) => legendEl.appendChild(g));
+      legendEl.hidden = groups.length === 0;
+    }
+
+    function renderLegend(kinds) {
+      zoningKinds = kinds;
+      renderAllLegends();
     }
 
     /** 클릭한 자리의 용도지역 이름을 알려 준다. */
     map.on('click', (event) => {
-      if (!map.getLayer('zoning-fill')) return;
-      const hit = map.queryRenderedFeatures(event.point, { layers: ['zoning-fill'] })[0];
-      if (hit) setStatus(`${hit.properties.zone}\n(${hit.properties.group})`, 'ok');
+      const layers = ['parcel-fill', 'zoning-fill'].filter((id) => map.getLayer(id));
+      if (!layers.length) return;
+      const hits = map.queryRenderedFeatures(event.point, { layers });
+      const parcel = hits.find((h) => h.layer.id === 'parcel-fill');
+      const zone = hits.find((h) => h.layer.id === 'zoning-fill');
+
+      const lines = [];
+      if (parcel) {
+        const p = parcel.properties;
+        lines.push(p.jibun ? `지번 ${p.jibun}` : '지번 미상');
+        lines.push(formatPrice(Number(p.price)) + (p.year ? ` · ${p.year}년 공시` : ''));
+        if (p.area) lines.push(`면적 ${Number(p.area).toLocaleString('ko-KR')}㎡`);
+      }
+      if (zone) lines.push(`${zone.properties.zone} (${zone.properties.group})`);
+      if (lines.length) setStatus(lines.join('\n'), 'ok');
     });
 
     async function loadZoning(at) {
@@ -755,6 +920,7 @@
         `이유: ${reason}`,
         nationalNote ? `국가 건물 데이터 미사용: ${nationalNote}` : '',
         zoningNote,
+        parcelNote,
         `좌표: ${at.lat}, ${at.lng}`,
         buildingCount === null ? '' : `건물: ${buildingCount}동 · 이름: ${labelCount || 0}개 (반경 700m)`,
         '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
@@ -766,6 +932,7 @@
         tileErrors = 0;
         map.setStyle(styleFor(layerEl.value));
         map.once('styledata', () => {
+          if (parcelGeoJson && parcelsEl && parcelsEl.checked) addParcelLayer(parcelGeoJson);
           if (zoningGeoJson && zoningEl && zoningEl.checked) addZoningLayer(zoningGeoJson);
           if (lastGeoJson && buildingsEl && buildingsEl.checked) addBuildingLayer(lastGeoJson);
         });
@@ -783,6 +950,9 @@
     if (zoningEl) {
       zoningEl.addEventListener('change', () => loadZoning(currentPoint));
     }
+    if (parcelsEl) {
+      parcelsEl.addEventListener('change', () => loadParcels(currentPoint));
+    }
 
     let currentPoint = point;
 
@@ -796,12 +966,14 @@
         map.easeTo({ center: [next.lng, next.lat], pitch: pitchFrom(nextTilt), zoom: 16.5, duration: 800 });
         loadBuildings(next);
         loadZoning(next);
+        loadParcels(next);
         return true;
       },
     };
 
     describe(point);
     map.once('load', () => {
+      loadParcels(point);
       loadZoning(point);
       loadBuildings(point);
     });
