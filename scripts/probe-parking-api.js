@@ -37,22 +37,51 @@ const AUTH_HINTS = [
 // 인증 오류가 아니라 서비스 없음이므로 경로 자체가 틀린 것이다.
 const CANDIDATES = [
   {
-    name: '전국주차장정보표준데이터 (tn_pubr_public_prkplce_info_api)',
-    url: `https://apis.data.go.kr/openapi/tn_pubr_public_prkplce_info_api?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
-  },
-  {
-    name: '전국주차장정보표준데이터 (odcloud 15012896)',
-    url: `https://api.odcloud.kr/api/15012896/v1/uddi:00000000-0000-0000-0000-000000000000?serviceKey=${KEY}&page=1&perPage=3`,
-  },
-  {
-    name: '한국교통안전공단 주차장 정보 (B553881)',
+    name: '주차장 정보 (B553881 PrkSttusInfo)',
     url: `https://apis.data.go.kr/B553881/Parking/PrkSttusInfo?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
+  },
+  {
+    name: '주차장 운영정보 (B553881 PrkOprInfo)',
+    url: `https://apis.data.go.kr/B553881/Parking/PrkOprInfo?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
+  },
+  {
+    name: '표준데이터 tn_pubr (api 호스트)',
+    url: `https://api.data.go.kr/openapi/tn_pubr_public_prkplce_info_api?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
+  },
+  {
+    name: '표준데이터 tn_pubr (apis 호스트)',
+    url: `https://apis.data.go.kr/openapi/tn_pubr_public_prkplce_info_api?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
   },
   {
     name: '세종시 도로안전표지 (지금 쓰는 것 — 대조군)',
     url: `${config.endpoint}/${config.operation}?serviceKey=${KEY}&pageNo=1&numOfRows=1&type=json`,
   },
 ];
+
+/** 데이터가 왔을 때 바로 연동할 수 있도록 건수와 필드명을 뽑아 둔다. */
+function describeData(body) {
+  try {
+    const json = JSON.parse(body);
+    const total =
+      json?.response?.body?.totalCount ??
+      json?.header?.totalCount ??
+      json?.totalCount ??
+      json?.body?.totalCount ??
+      null;
+    const items =
+      json?.response?.body?.items?.item ??
+      json?.response?.body?.items ??
+      json?.body?.items ??
+      json?.data ??
+      json?.items ??
+      null;
+    const first = Array.isArray(items) ? items[0] : items;
+    if (!first || typeof first !== 'object') return total !== null ? `전체 ${total}건` : '';
+    return `전체 ${total ?? '?'}건 · 필드: ${Object.keys(first).join(', ')}`;
+  } catch (_) {
+    return '';
+  }
+}
 
 function classify(status, body) {
   const text = body.slice(0, 2000);
@@ -77,8 +106,13 @@ async function probe(candidate) {
       headers: { Accept: 'application/json' },
     });
     const body = await response.text();
+    const verdict = classify(response.status, body);
     console.log(`   HTTP ${response.status} · ${response.headers.get('content-type') || '?'}`);
-    console.log(`   판정: ${classify(response.status, body)}`);
+    console.log(`   판정: ${verdict}`);
+    if (verdict === '데이터 응답') {
+      const summary = describeData(body);
+      if (summary) console.log(`   내용: ${summary}`);
+    }
     console.log(`   본문: ${body.slice(0, 400).replace(/\s+/g, ' ')}`);
     return { ...candidate, status: response.status, body };
   } catch (error) {
