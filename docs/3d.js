@@ -281,6 +281,19 @@
     });
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
+    // 위성 영상은 일반 지도와 별도 레이어라, 한쪽만 안 나오는 경우가 있다.
+    // 배경이 빈 채로 남으면 원인을 알 수 없으므로 타일 오류를 세어 알린다.
+    let tileErrors = 0;
+    map.on('error', (event) => {
+      const failed = event && event.sourceId === 'base';
+      if (!failed) return;
+      tileErrors += 1;
+      if (tileErrors === 5) {
+        const kind = layerEl && layerEl.value === 'satellite' ? '위성 영상' : '일반 지도';
+        setStatus(`VWorld ${kind} 타일을 불러오지 못하고 있습니다.\n인증키에 해당 레이어 사용 권한이 있는지 확인하세요.`, 'error');
+      }
+    });
+
     const marker = new maplibregl.Marker({ color: '#dc2626' }).setLngLat([point.lng, point.lat]).addTo(map);
 
     let buildingCount = null;
@@ -343,6 +356,7 @@
 
     if (layerEl) {
       layerEl.addEventListener('change', () => {
+        tileErrors = 0;
         map.setStyle(styleFor(layerEl.value));
         map.once('styledata', () => {
           if (lastGeoJson && buildingsEl && buildingsEl.checked) addBuildingLayer(lastGeoJson);
