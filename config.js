@@ -39,9 +39,12 @@ const config = {
   endpoint: process.env.API_ENDPOINT || DEFAULT_ENDPOINT,
   operation: process.env.API_OPERATION || DEFAULT_OPERATION,
   serviceKey: process.env.SERVICE_KEY || FALLBACK_SERVICE_KEY,
-  numOfRows: intFromEnv('NUM_OF_ROWS', 500),
+  // 이 API는 numOfRows를 무시하고 페이지당 20건만 준다. 값은 남겨두되
+  // 페이지 순회는 실제 수신 건수를 기준으로 한다.
+  numOfRows: intFromEnv('NUM_OF_ROWS', 100),
   // 일일 트래픽이 5,000건이므로 한 번의 전체 조회가 그 안에서 끝나도록 상한을 둔다.
   maxRecords: intFromEnv('MAX_RECORDS', 3000),
+  maxPages: intFromEnv('MAX_PAGES', 60),
   timeoutMs: intFromEnv('API_TIMEOUT_MS', 15000),
   retries: intFromEnv('API_RETRIES', 3),
   cacheTtlMs: intFromEnv('CACHE_TTL_MS', 6 * 60 * 60 * 1000),

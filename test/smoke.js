@@ -122,12 +122,14 @@ const MOCK_ITEMS = [
   { 표지관리번호: 'A-5', 표지명: '주차금지', 노선명: '금남구즉로', 도로종류: '시도', 차로수: '2', 위도: '', 경도: '' },
 ];
 
-function startMockServer(mode) {
+function startMockServer(mode, serverPageCap) {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, 'http://localhost');
       const pageNo = Number(url.searchParams.get('pageNo') || 1);
-      const numOfRows = Number(url.searchParams.get('numOfRows') || 10);
+      const requested = Number(url.searchParams.get('numOfRows') || 10);
+      // 실제 세종시 API는 numOfRows를 무시하고 페이지당 고정 건수만 돌려준다.
+      const numOfRows = serverPageCap ? Math.min(requested, serverPageCap) : requested;
       const type = url.searchParams.get('type');
       const slice = MOCK_ITEMS.slice((pageNo - 1) * numOfRows, pageNo * numOfRows);
 
@@ -162,8 +164,8 @@ function startMockServer(mode) {
   });
 }
 
-async function runPipeline(mode, numOfRows) {
-  const server = await startMockServer(mode);
+async function runPipeline(mode, numOfRows, serverPageCap) {
+  const server = await startMockServer(mode, serverPageCap);
   const { port } = server.address();
   try {
     const result = await fetchAll({
@@ -172,6 +174,7 @@ async function runPipeline(mode, numOfRows) {
       serviceKey: 'test%2Bkey%3D%3D',
       numOfRows,
       maxRecords: 1000,
+      maxPages: 60,
       timeoutMs: 5000,
       retries: 0,
       extraParams: {},
@@ -205,6 +208,54 @@ test('페이지가 나뉘어도 전체를 모은다', async () => {
   const { result } = await runPipeline('json', 2);
   assert.strictEqual(result.fetchedCount, 5);
   assert.strictEqual(result.totalCount, 5);
+});
+
+test('numOfRows를 무시하고 적게 주는 API에서도 전체를 모은다', async () => {
+  // 실제 세종시 API의 동작. numOfRows=500을 보내도 페이지당 2건만 온다.
+  const { result, signs } = await runPipeline('json', 500, 2);
+  assert.strictEqual(result.fetchedCount, 5, `기대 5건, 실제 ${result.fetchedCount}건`);
+  assert.strictEqual(result.pageSize, 2);
+  assert.strictEqual(signs.length, 5);
+});
+
+test('세종시 실제 응답 형태를 그대로 처리한다', () => {
+  const record = {
+    roadKnd: '시도',
+    roadRouteNo: '1번',
+    roadRouteNm: '한누리대로',
+    roadRouteDrc: 3,
+    cartrkCo: 0,
+    addr: '세종특별자치시대평동264-9',
+    la: 36.470988,
+    lo: 127.273696,
+    se: 2,
+    roadSflblAsortSn: 218,
+    dc: '주정차금지',
+    mngInstNm: '세종특별자치시',
+  };
+  const [sign] = normalizeRecords([record]);
+  assert.strictEqual(sign.lat, 36.470988);
+  assert.strictEqual(sign.lng, 127.273696);
+  assert.strictEqual(sign.coordSource, 'la/lo');
+  assert.strictEqual(sign.name, '주정차금지');
+  assert.strictEqual(sign.route, '한누리대로');
+  assert.strictEqual(sign.address, '세종특별자치시대평동264-9');
+  assert.strictEqual(sign.parking.category, 'no_stop_no_park');
+  assert.strictEqual(sign.parking.signCode, '218');
+});
+
+test('주소에 든 "주차장"에 속아 분류하지 않는다', () => {
+  // 표지명(dc)은 주차와 무관한데 주소에 주차장이 들어간 경우.
+  const [sign] = normalizeRecords([
+    { dc: '최고속도제한표지', addr: '세종특별자치시 주차장길 12', la: 36.47, lo: 127.27 },
+  ]);
+  assert.strictEqual(sign.parking.category, 'other');
+});
+
+test('표지명 필드가 없으면 레코드 전체를 훑는다', () => {
+  const [sign] = normalizeRecords([{ 비고: '주정차금지 구간', la: 36.47, lo: 127.27 }]);
+  assert.strictEqual(sign.parking.category, 'no_stop_no_park');
+  assert.strictEqual(sign.parking.matchedBy, 'text');
 });
 
 test('JSON 본문 판별이 형식을 올바르게 구분한다', () => {

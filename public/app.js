@@ -186,7 +186,7 @@
 
       const meta = document.createElement('p');
       meta.className = 'result__meta';
-      meta.textContent = [sign.parking.label, sign.address].filter(Boolean).join(' · ');
+      meta.textContent = [sign.parking.label, sign.route, sign.address].filter(Boolean).join(' · ');
 
       li.append(title, meta);
       li.addEventListener('click', () => {
