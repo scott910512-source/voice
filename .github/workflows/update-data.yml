@@ -99,10 +99,25 @@ jobs:
           git add docs
           if git diff --staged --quiet; then
             echo '변경 없음'
-          else
-            git commit -m '데이터 갱신 (자동)'
-            git push
+            exit 0
           fi
+          git commit -m '데이터 갱신 (자동)'
+
+          # 실행 중에 브랜치가 앞서 나가면 push가 거절된다. 재실행할 때 특히 잦다.
+          # docs/ 는 생성물이므로 충돌하면 방금 만든 쪽을 남긴다.
+          # rebase 중에는 theirs가 '지금 얹는 커밋'이라 our 생성물을 가리킨다.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$GITHUB_REF_NAME"; then
+              echo "푸시 성공 (${attempt}회차)"
+              exit 0
+            fi
+            echo "푸시 거절됨. 원격을 가져와 다시 시도합니다 (${attempt}회차)"
+            git fetch origin "$GITHUB_REF_NAME"
+            git pull --rebase -X theirs origin "$GITHUB_REF_NAME" || git rebase --abort || true
+            sleep 5
+          done
+          echo '::error::데이터 갱신 커밋을 푸시하지 못했습니다.'
+          exit 1
 
       - uses: actions/upload-artifact@v4
         if: always()

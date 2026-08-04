@@ -32,14 +32,21 @@ const AUTH_HINTS = [
   'LIMITED_NUMBER_OF_SERVICE_REQUESTS',
 ];
 
+// 확인된 것: tn_pubr_public_prkplce_info_api 경로는 존재하지 않는다.
+// 응답이 NO_OPENAPI_SERVICE_ERROR("해당 오픈API 서비스가 없거나 폐기됨")였다.
+// 인증 오류가 아니라 서비스 없음이므로 경로 자체가 틀린 것이다.
 const CANDIDATES = [
   {
-    name: '전국주차장정보표준데이터 (행안부 표준데이터 API)',
-    url: `https://api.data.go.kr/openapi/tn_pubr_public_prkplce_info_api?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
+    name: '전국주차장정보표준데이터 (tn_pubr_public_prkplce_info_api)',
+    url: `https://apis.data.go.kr/openapi/tn_pubr_public_prkplce_info_api?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
   },
   {
-    name: '전국주차장정보표준데이터 (apis 호스트)',
-    url: `https://apis.data.go.kr/openapi/tn_pubr_public_prkplce_info_api?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
+    name: '전국주차장정보표준데이터 (odcloud 15012896)',
+    url: `https://api.odcloud.kr/api/15012896/v1/uddi:00000000-0000-0000-0000-000000000000?serviceKey=${KEY}&page=1&perPage=3`,
+  },
+  {
+    name: '한국교통안전공단 주차장 정보 (B553881)',
+    url: `https://apis.data.go.kr/B553881/Parking/PrkSttusInfo?serviceKey=${KEY}&pageNo=1&numOfRows=3&type=json`,
   },
   {
     name: '세종시 도로안전표지 (지금 쓰는 것 — 대조군)',
