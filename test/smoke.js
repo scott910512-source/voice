@@ -288,6 +288,15 @@ test('세종시 실제 응답 형태를 그대로 처리한다', () => {
   assert.strictEqual(sign.parking.signCode, '218');
 });
 
+test('빈 문자열 필드가 값 있는 필드를 가리지 않는다', () => {
+  // 세종시 응답은 roadNmAddr(도로명주소)가 늘 비어 있고 addr(지번)에만 값이 있다.
+  // 빈 값을 먼저 고르면 주소가 통째로 사라진다.
+  const [sign] = normalizeRecords([
+    { roadNmAddr: '', addr: '세종특별자치시대평동264-9', dc: '주정차금지', la: 36.470949, lo: 127.273471 },
+  ]);
+  assert.strictEqual(sign.address, '세종특별자치시대평동264-9');
+});
+
 test('주소에 든 "주차장"에 속아 분류하지 않는다', () => {
   // 표지명(dc)은 주차와 무관한데 주소에 주차장이 들어간 경우.
   const [sign] = normalizeRecords([
