@@ -40,6 +40,8 @@ jobs:
           KAKAO_MAP_JS_KEY: ${{ vars.KAKAO_MAP_JS_KEY }}
           VWORLD_KEY: ${{ vars.VWORLD_KEY }}
         run: |
+          # tee를 거치면 종료 코드가 tee의 것이 되어 빌드 실패가 성공으로 넘어간다.
+          set -o pipefail
           for name in SERVICE_KEY NAVER_MAP_CLIENT_ID KAKAO_MAP_JS_KEY VWORLD_KEY; do
             [ -z "${!name}" ] && unset "$name"
           done

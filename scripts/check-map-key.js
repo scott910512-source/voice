@@ -40,9 +40,11 @@ async function probe(label, url, headers) {
 }
 
 async function main() {
+  // 지도 키는 없어도 OpenStreetMap으로 동작한다. 확인 단계가 빌드를
+  // 실패시키면 안 되므로 여기서는 알리고 정상 종료한다.
   if (!KEY) {
-    console.log('VWORLD_KEY가 설정되어 있지 않습니다.');
-    process.exit(1);
+    console.log('VWORLD_KEY가 없습니다. 지도는 OpenStreetMap으로 뜹니다.');
+    return;
   }
   console.log(`인증키: ${KEY.slice(0, 8)}… (${KEY.length}자)`);
   console.log(`Referer: ${REFERER}`);
