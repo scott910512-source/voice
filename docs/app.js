@@ -24,6 +24,7 @@
   const locateResultEl = document.getElementById('locate-result');
   const verdictEl = document.getElementById('verdict');
   const mapNoticeEl = document.getElementById('map-notice');
+  const view3dEl = document.getElementById('view-3d');
 
   let mapAdapter = null;
   let allSigns = [];
@@ -347,6 +348,8 @@
       if (payload.warning) locateResultEl.dataset.tone = 'error';
 
       renderVerdict(payload);
+      // 3D 링크에 지금 보고 있는 위치를 넘긴다.
+      view3dEl.href = `3d.html?at=${payload.center.lat},${payload.center.lng}&name=${encodeURIComponent(address)}`;
       refreshView();
     } catch (error) {
       locateResultEl.textContent = error.message;
