@@ -36,7 +36,7 @@ GitHub 저장소 → **Settings → Pages → Source: Deploy from a branch** →
 키가 실제로 동작하는지는 **국내 네트워크에서** 확인해야 합니다. GitHub 러너와 이 저장소를 만든 환경에서는 `api.vworld.kr`에 아예 닿지 못해 검증이 불가능했습니다.
 
 ```bash
-node scripts/check-map-key.js "세종특별자치시 연동면 내판리 715"
+node scripts/check-map-key.js "세종특별자치시 연동면 명학산단로 110-5"
 ```
 
 WMTS 타일 요청, 지도 엔진 스크립트, 주소 검색 세 가지를 Referer를 붙인 경우와 안 붙인 경우로 나눠 확인합니다. 키가 틀린 것인지 도메인 등록이 안 된 것인지 구분할 수 있습니다.
@@ -158,12 +158,12 @@ Leaflet은 `public/vendor/leaflet/`에 포함해 두었습니다. 사내망·폐
 | 바로 옆에는 표지가 없음 | 반경 안에는 표지가 있지만 100m 안에는 없음 |
 | 주차 관련 표지 없음 | 반경 안에 주차 관련 표지가 등록되어 있지 않음 |
 
-표지가 없다고 주차가 허용된다는 뜻은 아닙니다. 이 판정은 등록된 도로안전표지만 근거로 하며, 현장 표지와 노면 표시가 우선합니다. 기본값은 `세종특별자치시 연동면 내판리 715` / 반경 500m이며 `.env`의 `DEFAULT_ADDRESS`, `DEFAULT_RADIUS_M`으로 바꿉니다.
+표지가 없다고 주차가 허용된다는 뜻은 아닙니다. 이 판정은 등록된 도로안전표지만 근거로 하며, 현장 표지와 노면 표시가 우선합니다. 기본값은 `세종특별자치시 연동면 명학산단로 110-5` / 반경 500m이며 `.env`의 `DEFAULT_ADDRESS`, `DEFAULT_RADIUS_M`으로 바꿉니다.
 
 서버 모드에서는 `VWORLD_KEY` → `KAKAO_REST_KEY` → 네이버(`NAVER_MAP_CLIENT_ID` + `NAVER_MAP_CLIENT_SECRET`) → OSM Nominatim 순으로 시도합니다. 정적(PWA) 모드에서는 키가 필요 없는 **Nominatim**을 브라우저에서 직접 씁니다. 키가 없으면 국내 도로명 정확도가 떨어지므로, 그럴 때는 검색창에 **`36.4801, 127.2890` 처럼 좌표를 직접 입력**해도 됩니다. 지오코딩 없이 바로 인식합니다.
 
 ```bash
-curl "http://localhost:3000/api/near?address=세종특별자치시 연동면 내판리 715&radius=500"
+curl "http://localhost:3000/api/near?address=세종특별자치시 연동면 명학산단로 110-5&radius=500"
 ```
 
 ## 이 공공데이터의 실제 내용 (2026-08-04 확인)

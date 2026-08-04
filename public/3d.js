@@ -15,7 +15,7 @@
 
   // 기본 주소는 좌표를 박아두지 않고 실제로 찾아간다. 주소만 바꾸고 좌표를
   // 그대로 두면 엉뚱한 곳이 열리는데, 실제로 한 번 그랬다.
-  const DEFAULT_ADDRESS = '세종특별자치시 연동면 내판리 715';
+  const DEFAULT_ADDRESS = '세종특별자치시 연동면 명학산단로 110-5';
   const SEJONG_CENTER = { lat: 36.48, lng: 127.289, label: '세종특별자치시' };
 
   const statusEl = document.getElementById('status3d');
@@ -26,26 +26,8 @@
   const layerEl = document.getElementById('layer');
   const buildingsEl = document.getElementById('buildings');
   const labelsEl = document.getElementById('labels');
-  const moodEl = document.getElementById('mood');
   const sourceEl = document.getElementById('source');
-
-  /**
-   * 색감 효과.
-   *
-   * 진짜 과거 항공사진은 공개 타일 API가 없어(국토정보플랫폼 뷰어에서만
-   * 연도별로 볼 수 있다) 시대를 되돌릴 수는 없다. 대신 화면 색감만 바꿔
-   * 옛날 사진처럼 보이게 한다. 데이터가 아니라 보기 효과임을 분명히 한다.
-   */
-  function applyMood(value) {
-    const container = document.getElementById('vmap');
-    const filters = {
-      none: '',
-      sepia: 'sepia(0.72) contrast(1.05) saturate(0.85) brightness(0.98)',
-      mono: 'grayscale(1) contrast(1.1)',
-      faded: 'sepia(0.35) saturate(0.6) contrast(0.92) brightness(1.06)',
-    };
-    container.style.filter = filters[value] || '';
-  }
+  const to2dEl = document.getElementById('to-2d');
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
   let vworldKey = '';
@@ -654,6 +636,8 @@
       kind: 'maplibre',
       moveTo(next, nextTilt) {
         currentPoint = next;
+        // 2D로 넘어갈 때 지금 보고 있는 위치를 그대로 이어 간다.
+        if (to2dEl) to2dEl.href = `./?at=${next.lat},${next.lng}&name=${encodeURIComponent(placeEl.value)}`;
         marker.setLngLat([next.lng, next.lat]);
         map.easeTo({ center: [next.lng, next.lat], pitch: pitchFrom(nextTilt), zoom: 16.5, duration: 800 });
         loadBuildings(next);
@@ -753,11 +737,6 @@
       setStatus(`3D 지도를 띄우지 못했습니다.\n${error.message}`, 'error');
       diag([reason, ...result.tried]);
     }
-  }
-
-  if (moodEl) {
-    moodEl.addEventListener('change', () => applyMood(moodEl.value));
-    applyMood(moodEl.value);
   }
 
   goEl.addEventListener('click', go);

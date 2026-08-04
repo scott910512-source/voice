@@ -1,12 +1,17 @@
 /* 자동 생성 파일. scripts/build-static.js 가 만든다. */
+<<<<<<< HEAD
 const VERSION = "05bd79a9e087";
 const CACHE = 'sejong-parking-' + VERSION;
+=======
+const VERSION = "fe34bc342df1";
+const CACHE = 'sejong-map-' + VERSION;
+>>>>>>> 0f8c169 (화면을 2D 보기 / 3D 보기로 정리하고 주차 기능을 걷어냈다)
 const ASSETS = [
   "./",
   "index.html",
   "style.css",
-  "app.js",
-  "map.js",
+  "view2d.js",
+  "sw-register.js",
   "data/signs.js",
   "manifest.webmanifest",
   "icons/icon-192.png",

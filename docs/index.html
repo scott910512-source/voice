@@ -3,11 +3,11 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>세종시 주차 허용·금지 구간 지도</title>
-    <meta name="description" content="세종특별자치시 도로안전표지 공공데이터로 주차 가능·금지 구간을 확인합니다." />
+    <title>세종 지도 보기</title>
+    <meta name="description" content="VWorld 국내 지도를 2D와 3D로 보는 지도 뷰어." />
     <meta name="theme-color" content="#2563eb" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="세종 주차" />
+    <meta name="apple-mobile-web-app-title" content="세종 지도" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
@@ -16,76 +16,45 @@
   <body>
     <aside class="panel">
       <header class="panel__header">
-        <h1>세종시 주차 구간 조회</h1>
-        <p class="panel__sub">세종특별자치시 도로안전표지 공공데이터 기반</p>
+        <h1>2D 지도</h1>
+        <p class="panel__sub">VWorld 국내 지도</p>
       </header>
 
+      <nav class="viewtabs">
+        <a class="viewtabs__tab viewtabs__tab--on" href="./" aria-current="page">2D 보기</a>
+        <a class="viewtabs__tab" id="to-3d" href="3d.html">3D 보기</a>
+      </nav>
+
       <section class="locate">
-        <label class="locate__label" for="address">위치로 찾기</label>
+        <label class="locate__label" for="address">위치</label>
         <input
           id="address"
           type="search"
-          placeholder="도로명주소 또는 '위도, 경도'"
-          value="세종특별자치시 연동면 내판리 715"
+          placeholder="주소 또는 '위도, 경도'"
+          value="세종특별자치시 연동면 명학산단로 110-5"
           autocomplete="off"
         />
         <div class="locate__row">
-          <select id="radius">
-            <option value="200">반경 200m</option>
-            <option value="500" selected>반경 500m</option>
-            <option value="1000">반경 1km</option>
-            <option value="2000">반경 2km</option>
-          </select>
-          <button id="locate" type="button">주변 조회</button>
-          <button id="clear-locate" type="button" class="ghost" hidden>전체 보기</button>
-          <a id="view-3d" class="ghost" href="3d.html">3D</a>
+          <button id="locate" type="button">이동</button>
         </div>
         <p id="locate-result" class="locate__result"></p>
       </section>
 
-      <section id="verdict" class="verdict" hidden>
-        <p class="verdict__headline"></p>
-        <p class="verdict__detail"></p>
+      <section class="locate">
+        <label class="locate__label" for="layer2d">배경</label>
+        <select id="layer2d">
+          <option value="base">일반 지도</option>
+          <option value="satellite">위성 영상</option>
+          <option value="hybrid">위성 + 지명</option>
+          <option value="gray">회색 지도</option>
+          <option value="midnight">야간 지도</option>
+        </select>
       </section>
 
-      <section class="filters">
-        <label class="filter filter--allowed">
-          <input type="checkbox" data-category="parking_allowed" checked />
-          <span class="dot"></span>
-          <span class="filter__label">주차 가능</span>
-          <span class="filter__count" data-count="parking_allowed">0</span>
-        </label>
-        <label class="filter filter--nopark">
-          <input type="checkbox" data-category="no_park" checked />
-          <span class="dot"></span>
-          <span class="filter__label">주차 금지</span>
-          <span class="filter__count" data-count="no_park">0</span>
-        </label>
-        <label class="filter filter--nostop">
-          <input type="checkbox" data-category="no_stop_no_park" checked />
-          <span class="dot"></span>
-          <span class="filter__label">정차·주차 금지</span>
-          <span class="filter__count" data-count="no_stop_no_park">0</span>
-        </label>
-        <label class="filter filter--other">
-          <input type="checkbox" data-category="other" />
-          <span class="dot"></span>
-          <span class="filter__label">주차 무관 표지</span>
-          <span class="filter__count" data-count="other">0</span>
-        </label>
-      </section>
-
-      <section class="search">
-        <input id="query" type="search" placeholder="도로명·노선명·주소 검색" autocomplete="off" />
-        <button id="refresh" type="button" title="공공데이터 다시 불러오기">새로고침</button>
-      </section>
-
-      <p class="status" id="status">데이터를 불러오는 중…</p>
-
-      <ul class="results" id="results"></ul>
+      <p class="status" id="status"></p>
 
       <footer class="panel__footer">
-        <p>출처: 공공데이터포털 · 세종특별자치시 도로안전표지 조회 서비스</p>
+        <p>배경지도 출처: 국토교통부 VWorld</p>
         <p id="meta" class="meta"></p>
       </footer>
     </aside>
@@ -94,18 +63,9 @@
 
     <p id="map-notice" class="map-notice" hidden></p>
 
-    <div id="detail" class="detail" hidden>
-      <button class="detail__close" type="button" aria-label="닫기">×</button>
-      <h2 id="detail-title"></h2>
-      <p id="detail-badge" class="badge"></p>
-      <dl id="detail-fields"></dl>
-    </div>
-
-    <!-- 정적 배포(GitHub Pages·로컬 파일)에서는 이 파일이 데이터를 담는다.
-         서버 모드에서는 없어도 되므로 로드 실패를 무시한다. -->
     <script src="data/signs.js" onerror="void 0"></script>
-    <script src="map.js"></script>
-    <script src="app.js"></script>
+    <script src="vendor/leaflet/leaflet.js"></script>
+    <script src="view2d.js"></script>
     <script src="sw-register.js"></script>
   </body>
 </html>

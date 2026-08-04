@@ -44,9 +44,9 @@ function writeDataFile(payload) {
 
 function writeManifest() {
   const manifest = {
-    name: '세종시 주차 허용·금지 구간',
-    short_name: '세종 주차',
-    description: '세종특별자치시 도로안전표지 공공데이터로 주차 가능·금지 구간을 확인합니다.',
+    name: '세종 지도 보기 (2D·3D)',
+    short_name: '세종 지도',
+    description: 'VWorld 국내 지도를 2D와 3D로 봅니다.',
     start_url: './',
     scope: './',
     display: 'standalone',
@@ -96,8 +96,8 @@ function writeServiceWorker(version) {
     './',
     'index.html',
     'style.css',
-    'app.js',
-    'map.js',
+    'view2d.js',
+    'sw-register.js',
     'data/signs.js',
     'manifest.webmanifest',
     'icons/icon-192.png',
@@ -112,7 +112,7 @@ function writeServiceWorker(version) {
 
   const sw = `/* 자동 생성 파일. scripts/build-static.js 가 만든다. */
 const VERSION = ${JSON.stringify(version)};
-const CACHE = 'sejong-parking-' + VERSION;
+const CACHE = 'sejong-map-' + VERSION;
 const ASSETS = ${JSON.stringify(assets, null, 2)};
 
 self.addEventListener('install', (event) => {

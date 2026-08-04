@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>3D 지도 — 세종시 주차 구간 조회</title>
+    <title>3D 지도 — 세종 지도 보기</title>
     <meta name="theme-color" content="#2563eb" />
     <link rel="icon" href="icons/icon-192.png" />
     <link rel="stylesheet" href="style.css" />
@@ -119,6 +119,10 @@
         transform: translateY(-6px);
       }
 
+      .three-d__panel .viewtabs {
+        padding: 0 0 14px;
+      }
+
       #status3d {
         margin: 0 0 12px;
         padding: 10px 12px;
@@ -162,11 +166,16 @@
         <h1>3D 지도</h1>
         <p class="three-d__sub">VWorld 지도를 기울여 보고, 건물을 입체로 세웁니다.</p>
 
+        <nav class="viewtabs">
+          <a class="viewtabs__tab" id="to-2d" href="./">2D 보기</a>
+          <a class="viewtabs__tab viewtabs__tab--on" href="3d.html" aria-current="page">3D 보기</a>
+        </nav>
+
         <p id="status3d">준비 중…</p>
 
         <div class="three-d__field">
           <label for="place">위치</label>
-          <input id="place" type="search" value="세종특별자치시 연동면 내판리 715" autocomplete="off" />
+          <input id="place" type="search" value="세종특별자치시 연동면 명학산단로 110-5" autocomplete="off" />
         </div>
 
         <div class="three-d__field">
@@ -190,16 +199,6 @@
         </div>
 
         <div class="three-d__field">
-          <label for="mood">색감 (보기 효과)</label>
-          <select id="mood">
-            <option value="none">기본</option>
-            <option value="sepia">옛날 사진 느낌</option>
-            <option value="faded">빛바랜 느낌</option>
-            <option value="mono">흑백</option>
-          </select>
-        </div>
-
-        <div class="three-d__field">
           <label for="source">건물 데이터</label>
           <select id="source">
             <option value="auto">국가 데이터 우선 (전국·층수 정확)</option>
@@ -214,7 +213,6 @@
 
         <div class="three-d__actions">
           <button id="go" type="button">이동</button>
-          <a href="./">2D로</a>
         </div>
 
         <p id="diag"></p>

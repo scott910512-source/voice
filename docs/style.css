@@ -482,3 +482,28 @@ body {
     width: auto;
   }
 }
+
+.viewtabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 12px;
+}
+
+.viewtabs__tab {
+  flex: 1;
+  padding: 9px 12px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.viewtabs__tab--on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
