@@ -1,0 +1,14 @@
+{
+  "name": "sejong-parking-sign-map",
+  "version": "1.0.0",
+  "description": "세종특별자치시 도로안전표지 OpenAPI 기반 주차 가능/금지 구간 조회 지도 서비스",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

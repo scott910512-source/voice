@@ -1,0 +1,335 @@
+:root {
+  --allowed: #1a7f4b;
+  --nopark: #d97706;
+  --nostop: #dc2626;
+  --other: #64748b;
+  --bg: #ffffff;
+  --fg: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --panel: #f8fafc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e2e8f0;
+    --muted: #94a3b8;
+    --line: #1e293b;
+    --panel: #111c33;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.panel {
+  width: 360px;
+  flex: 0 0 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.panel__header {
+  padding: 20px 20px 12px;
+}
+
+.panel__header h1 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}
+
+.panel__sub {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.filters {
+  padding: 4px 16px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.filter:hover {
+  background: rgba(127, 127, 127, 0.1);
+}
+
+.filter input {
+  accent-color: currentColor;
+  margin: 0;
+}
+
+.filter .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--other);
+}
+
+.filter--allowed .dot {
+  background: var(--allowed);
+}
+.filter--nopark .dot {
+  background: var(--nopark);
+}
+.filter--nostop .dot {
+  background: var(--nostop);
+}
+
+.filter__label {
+  flex: 1;
+}
+
+.filter__count {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.search {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 12px;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+}
+
+.search button {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: inherit;
+  cursor: pointer;
+}
+
+.search button:hover {
+  border-color: var(--muted);
+}
+
+.status {
+  margin: 0;
+  padding: 0 20px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+
+.status[data-tone='error'] {
+  color: var(--nostop);
+}
+
+.results {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 12px;
+}
+
+.result {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--other);
+  background: var(--bg);
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.result:hover {
+  outline: 1px solid var(--line);
+}
+
+.result--parking_allowed {
+  border-left-color: var(--allowed);
+}
+.result--no_park {
+  border-left-color: var(--nopark);
+}
+.result--no_stop_no_park {
+  border-left-color: var(--nostop);
+}
+
+.result__title {
+  font-size: 13.5px;
+  font-weight: 600;
+  margin: 0 0 3px;
+}
+
+.result__meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel__footer {
+  border-top: 1px solid var(--line);
+  padding: 10px 20px 14px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.panel__footer p {
+  margin: 2px 0;
+}
+
+.map {
+  flex: 1;
+  height: 100%;
+}
+
+.marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  background: var(--other);
+}
+
+.marker--parking_allowed {
+  background: var(--allowed);
+}
+.marker--no_park {
+  background: var(--nopark);
+}
+.marker--no_stop_no_park {
+  background: var(--nostop);
+}
+.marker--active {
+  transform: scale(1.5);
+}
+
+.detail {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 340px;
+  max-height: 55vh;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18);
+  z-index: 500;
+}
+
+.detail h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  padding-right: 20px;
+}
+
+.detail__close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.badge {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--other);
+}
+
+.badge[data-category='parking_allowed'] {
+  background: var(--allowed);
+}
+.badge[data-category='no_park'] {
+  background: var(--nopark);
+}
+.badge[data-category='no_stop_no_park'] {
+  background: var(--nostop);
+}
+
+.detail dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: minmax(80px, 38%) 1fr;
+  gap: 4px 10px;
+  font-size: 12px;
+}
+
+.detail dt {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  body {
+    flex-direction: column;
+  }
+
+  .panel {
+    width: 100%;
+    flex: 0 0 auto;
+    max-height: 45vh;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .detail {
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+}
