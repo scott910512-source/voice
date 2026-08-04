@@ -28,6 +28,8 @@
   const labelsEl = document.getElementById('labels');
   const sourceEl = document.getElementById('source');
   const to2dEl = document.getElementById('to-2d');
+  const zoningEl = document.getElementById('zoning');
+  const legendEl = document.getElementById('legend');
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
   let vworldKey = '';
@@ -277,6 +279,74 @@
   }
 
   /** 성공하면 {geojson, labels, layer}, 지원하지 않으면 null. */
+  /* --------------------------------------------------------- 용도지역 */
+
+  /**
+   * 용도지역지구도. 주거·상업·공업·녹지 같은 지정 용도를 색으로 구분한다.
+   * 건물과 같은 VWorld 데이터 API를 쓰므로 인증키가 따로 필요 없다.
+   *
+   * 레이어 이름은 확신할 수 없어 후보를 순서대로 시도한다. 이 환경에서는
+   * VWorld에 닿지 못해 어느 이름이 맞는지 확인할 수 없었다.
+   */
+  const VWORLD_ZONING_LAYERS = ['LT_C_UQ111', 'LT_C_UQ111_TMP', 'LT_C_UPISUQ111'];
+
+  const ZONE_NAME_FIELDS = ['dgm_nm', 'prpos_area_dstrc_nm', 'uname', 'zone_nm', '용도지역명', 'name'];
+
+  /** 용도 이름에서 큰 갈래를 뽑아 색을 정한다. 세부 지정은 종류가 너무 많다. */
+  const ZONE_COLORS = [
+    { test: /전용주거|일반주거|준주거|주거/, label: '주거지역', color: '#f6d365' },
+    { test: /중심상업|일반상업|근린상업|유통상업|상업/, label: '상업지역', color: '#e8657a' },
+    { test: /전용공업|일반공업|준공업|공업/, label: '공업지역', color: '#7b6bd6' },
+    { test: /보전녹지|생산녹지|자연녹지|녹지/, label: '녹지지역', color: '#5aa469' },
+    { test: /보전관리|생산관리|계획관리|관리/, label: '관리지역', color: '#c9a227' },
+    { test: /농림/, label: '농림지역', color: '#8f9e5b' },
+    { test: /자연환경보전/, label: '자연환경보전', color: '#3f7f7a' },
+  ];
+
+  function zoneStyle(name) {
+    const hit = ZONE_COLORS.find((z) => z.test.test(String(name || '')));
+    return hit || { label: '기타', color: '#94a3b8' };
+  }
+
+  async function fetchZoning(point, radiusM) {
+    if (!vworldKey) return null;
+    const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
+    const domain = location.hostname || 'localhost';
+    const tried = [];
+
+    for (const layer of VWORLD_ZONING_LAYERS) {
+      const url =
+        `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
+        `&size=1000&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
+        `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(domain)}`;
+      try {
+        const data = await jsonp(url, 12000);
+        const features = data?.response?.result?.featureCollection?.features;
+        if (!Array.isArray(features) || !features.length) {
+          tried.push(`${layer}: 결과 없음`);
+          continue;
+        }
+
+        const kinds = new Map();
+        const out = features.map((feature) => {
+          const name = pickField(feature.properties || {}, ZONE_NAME_FIELDS);
+          const style = zoneStyle(name);
+          kinds.set(style.label, style.color);
+          return {
+            type: 'Feature',
+            properties: { zone: String(name || '용도 미상'), group: style.label, color: style.color },
+            geometry: feature.geometry,
+          };
+        });
+
+        return { geojson: { type: 'FeatureCollection', features: out }, layer, kinds };
+      } catch (error) {
+        tried.push(`${layer}: ${error.message}`);
+      }
+    }
+    return { failed: tried };
+  }
+
   async function fetchVworldBuildings(point, radiusM) {
     if (!vworldKey) return null;
     const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
@@ -503,6 +573,7 @@
     let labelCount = null;
     let buildingSource = null;
     let nationalNote = '';
+    let zoningNote = '';
     let labelMarkers = [];
 
     /**
@@ -522,6 +593,84 @@
         el.className = 'poi-label';
         el.textContent = label.name;
         labelMarkers.push(new maplibregl.Marker({ element: el, anchor: 'bottom' }).setLngLat([label.lng, label.lat]).addTo(map));
+      }
+    }
+
+    let zoningGeoJson = null;
+
+    /** 용도지역을 반투명 면으로 깔고 범례를 만든다. 건물보다 아래에 둔다. */
+    function addZoningLayer(geojson) {
+      if (map.getLayer('zoning-fill')) map.removeLayer('zoning-fill');
+      if (map.getLayer('zoning-line')) map.removeLayer('zoning-line');
+      if (map.getSource('zoning')) map.removeSource('zoning');
+      if (!geojson) return;
+
+      map.addSource('zoning', { type: 'geojson', data: geojson });
+      // 건물이 있으면 그 아래에 깔아야 건물이 가려지지 않는다.
+      const below = map.getLayer('buildings-3d') ? 'buildings-3d' : undefined;
+      map.addLayer(
+        {
+          id: 'zoning-fill',
+          type: 'fill',
+          source: 'zoning',
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.35 },
+        },
+        below
+      );
+      map.addLayer(
+        {
+          id: 'zoning-line',
+          type: 'line',
+          source: 'zoning',
+          paint: { 'line-color': ['get', 'color'], 'line-width': 1, 'line-opacity': 0.9 },
+        },
+        below
+      );
+    }
+
+    function renderLegend(kinds) {
+      if (!legendEl) return;
+      legendEl.textContent = '';
+      if (!kinds || !kinds.size) {
+        legendEl.hidden = true;
+        return;
+      }
+      for (const [label, color] of kinds) {
+        const row = document.createElement('span');
+        row.className = 'legend__item';
+        const dot = document.createElement('i');
+        dot.style.background = color;
+        row.append(dot, document.createTextNode(label));
+        legendEl.appendChild(row);
+      }
+      legendEl.hidden = false;
+    }
+
+    /** 클릭한 자리의 용도지역 이름을 알려 준다. */
+    map.on('click', (event) => {
+      if (!map.getLayer('zoning-fill')) return;
+      const hit = map.queryRenderedFeatures(event.point, { layers: ['zoning-fill'] })[0];
+      if (hit) setStatus(`${hit.properties.zone}\n(${hit.properties.group})`, 'ok');
+    });
+
+    async function loadZoning(at) {
+      if (!zoningEl || !zoningEl.checked) {
+        addZoningLayer(null);
+        renderLegend(null);
+        zoningNote = '';
+        return;
+      }
+      const result = await fetchZoning(at, 900);
+      if (result && result.geojson) {
+        zoningGeoJson = result.geojson;
+        addZoningLayer(zoningGeoJson);
+        renderLegend(result.kinds);
+        zoningNote = `용도지역 ${result.geojson.features.length}구역 (${result.layer})`;
+      } else {
+        zoningGeoJson = null;
+        addZoningLayer(null);
+        renderLegend(null);
+        zoningNote = result && result.failed ? `용도지역 없음: ${result.failed.join(' / ')}` : '';
       }
     }
 
@@ -605,6 +754,7 @@
         `방식: MapLibre + VWorld 타일 + ${buildingSource || '건물 없음'}`,
         `이유: ${reason}`,
         nationalNote ? `국가 건물 데이터 미사용: ${nationalNote}` : '',
+        zoningNote,
         `좌표: ${at.lat}, ${at.lng}`,
         buildingCount === null ? '' : `건물: ${buildingCount}동 · 이름: ${labelCount || 0}개 (반경 700m)`,
         '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
@@ -616,6 +766,7 @@
         tileErrors = 0;
         map.setStyle(styleFor(layerEl.value));
         map.once('styledata', () => {
+          if (zoningGeoJson && zoningEl && zoningEl.checked) addZoningLayer(zoningGeoJson);
           if (lastGeoJson && buildingsEl && buildingsEl.checked) addBuildingLayer(lastGeoJson);
         });
       });
@@ -629,6 +780,9 @@
     if (sourceEl) {
       sourceEl.addEventListener('change', () => loadBuildings(currentPoint));
     }
+    if (zoningEl) {
+      zoningEl.addEventListener('change', () => loadZoning(currentPoint));
+    }
 
     let currentPoint = point;
 
@@ -641,12 +795,16 @@
         marker.setLngLat([next.lng, next.lat]);
         map.easeTo({ center: [next.lng, next.lat], pitch: pitchFrom(nextTilt), zoom: 16.5, duration: 800 });
         loadBuildings(next);
+        loadZoning(next);
         return true;
       },
     };
 
     describe(point);
-    map.once('load', () => loadBuildings(point));
+    map.once('load', () => {
+      loadZoning(point);
+      loadBuildings(point);
+    });
   }
 
   /** VWorld 3D의 tilt(-90~0)를 MapLibre의 pitch(0~85)로 옮긴다. */
