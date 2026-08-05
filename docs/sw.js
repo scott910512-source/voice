@@ -1,5 +1,5 @@
 /* 자동 생성 파일. scripts/build-static.js 가 만든다. */
-const VERSION = "59b1cc7a3865";
+const VERSION = "dc10f22cadbd";
 const CACHE = 'sejong-map-' + VERSION;
 const ASSETS = [
   "./",
