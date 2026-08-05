@@ -220,6 +220,7 @@
     priceSummary,
     priceScaleNote,
     formatPrice,
+    formatTotal,
     areaGuard,
     distanceM,
   } = window.VWorldData;
@@ -673,9 +674,13 @@
         lines.push(p.jibun ? `지번 ${p.jibun}` : '지번 미상');
         lines.push(formatPrice(price) + (p.year ? ` · ${p.year}년 공시` : ''));
         // rank 0(가장 싼 필지)도 보여야 하므로 값 존재로 판단한다.
+        if (p.area) lines.push(`면적 ${Number(p.area).toLocaleString('ko-KR')}㎡`);
+        // ㎡당 금액만 보면 아파트 대지처럼 단가가 높은 땅이 터무니없이 비싸
+        // 보인다. 총액을 같이 내야 실제 규모가 가늠된다.
+        const total = formatTotal(price, p.area);
+        if (total) lines.push(`필지 전체 약 ${total} (공시지가 × 면적, 땅값만)`);
         if (price > 0) lines.push(`이 화면 기준 백분위 ${Number(p.rank) || 0} (0 = 가장 쌈, 100 = 가장 비쌈)`);
         if (price <= 0) lines.push('공시지가가 함께 오지 않은 필지입니다 (도로·구거·국공유지 등)');
-        if (p.area) lines.push(`면적 ${Number(p.area).toLocaleString('ko-KR')}㎡`);
       }
       if (zone) lines.push(`${zone.properties.zone} (${zone.properties.group})`);
       if (lines.length) setStatus(lines.join('\n'), 'ok');

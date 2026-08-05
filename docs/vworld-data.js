@@ -298,6 +298,30 @@
     return `${value.toLocaleString('ko-KR')}원/㎡ (평당 ${perPyeong.toLocaleString('ko-KR')}원)`;
   }
 
+  /**
+   * 필지 전체의 공시지가 총액. 공시지가 × 면적.
+   *
+   * ㎡당 금액만 보면 아파트 대지처럼 단가가 높은 땅이 터무니없이 비싸
+   * 보인다. 총액을 같이 보여 주면 그 필지가 실제로 얼마짜리 땅인지 가늠이
+   * 된다. 다만 이건 땅값이고 건물값이 아니다.
+   */
+  function formatTotal(price, area) {
+    const p = Number(price);
+    const a = Number(String(area).replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(p) || p <= 0 || !Number.isFinite(a) || a <= 0) return '';
+    const total = p * a;
+    if (total >= 1000000000000) return `${trimZero(total / 1000000000000, 2)}조원`;
+    if (total >= 100000000) return `${trimZero(total / 100000000, 1)}억원`;
+    return `${Math.round(total / 10000).toLocaleString('ko-KR')}만원`;
+  }
+
+  /** 지도 위에 겹쳐 쓸 짧은 금액. 칸이 좁아 한 줄로 끝나야 한다. */
+  function labelPrice(price) {
+    const p = Number(price);
+    if (!Number.isFinite(p) || p <= 0) return '';
+    return `${shortPrice(p)}/㎡`;
+  }
+
   /** 범례에 넣을 짧은 표기. 12,300 → 1.2만 */
   function shortPrice(value) {
     if (!Number.isFinite(value)) return '-';
@@ -551,6 +575,8 @@
     priceSummary,
     priceScaleNote,
     formatPrice,
+    formatTotal,
+    labelPrice,
     shortPrice,
     priceStyle,
     zoneStyle,

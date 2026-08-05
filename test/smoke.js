@@ -645,6 +645,23 @@ test('지도를 조금 움직인 정도로는 다시 받지 않는다', () => {
   assert.ok(guard.claim({ lat: 36.503, lng: 127.3 }, 800, false));
 });
 
+test('필지 총액은 공시지가 x 면적으로 낸다', () => {
+  const api = loadVWorldData();
+  // 아파트 대지처럼 단가가 높은 땅. ㎡당 금액만 보면 감이 안 온다.
+  assert.strictEqual(api.formatTotal(3000000, '12000'), '360억원');
+  assert.strictEqual(api.formatTotal(240000, '1500'), '3.6억원');
+  assert.strictEqual(api.formatTotal(50000, '300'), '1,500만원');
+  // 면적에 단위가 붙어 와도 숫자만 뽑는다.
+  assert.strictEqual(api.formatTotal(240000, '1,500㎡'), '3.6억원');
+  // 값이 없으면 아무것도 내지 않는다. 0원이라고 쓰면 사실이 아니다.
+  assert.strictEqual(api.formatTotal(0, '1500'), '');
+  assert.strictEqual(api.formatTotal(240000, ''), '');
+  assert.strictEqual(api.formatTotal(240000, null), '');
+
+  assert.strictEqual(api.labelPrice(2400000), '240만/㎡');
+  assert.strictEqual(api.labelPrice(0), '');
+});
+
 test('인증키가 없으면 조회하지 않는다', async () => {
   const api = loadVWorldData();
   assert.strictEqual(await api.fetchParcels('', { lat: 36.5, lng: 127.3 }, 500), null);

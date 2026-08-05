@@ -554,3 +554,27 @@ body {
   border-radius: 3px;
   display: inline-block;
 }
+
+/*
+  필지 위에 겹쳐 쓰는 금액. 배경 상자를 씌우면 필지 색이 가려져 색 구분이
+  무의미해지므로, 흰 테두리만 둘러 어떤 배경 위에서도 읽히게 한다.
+*/
+.parcel-label {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+  color: #0f172a;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow:
+    0 0 3px #fff,
+    0 0 3px #fff,
+    0 0 3px #fff;
+  pointer-events: none;
+}
+.parcel-label::before {
+  display: none;
+}

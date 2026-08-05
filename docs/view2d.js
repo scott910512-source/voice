@@ -22,10 +22,20 @@
   const parcelsEl = document.getElementById('parcels2d');
   const zoningEl = document.getElementById('zoning2d');
   const priceModeEl = document.getElementById('pricemode2d');
+  const priceLabelsEl = document.getElementById('pricelabels2d');
   const legendEl = document.getElementById('legend2d');
 
-  const { fetchParcels, fetchZoning, applyPriceColors, priceSummary, priceScaleNote, formatPrice, areaGuard } =
+  const { fetchParcels, fetchZoning, applyPriceColors, priceSummary, priceScaleNote, formatPrice, formatTotal, labelPrice, areaGuard } =
     window.VWorldData;
+
+  /**
+   * 지도 위에 금액을 겹쳐 쓰는 조건.
+   *
+   * 필지가 많으면 글자가 서로 겹쳐 아무것도 읽히지 않는다. 충분히 확대해
+   * 필지가 크게 보일 때만, 그리고 개수가 많지 않을 때만 쓴다.
+   */
+  const LABEL_MIN_ZOOM = 16;
+  const LABEL_MAX_COUNT = 250;
 
   const PRICE_TITLES = {
     fixed: '공시지가 (고정 구간, 원/㎡)',
@@ -181,7 +191,45 @@
     if (price > 0) lines.push(`이 화면 기준 백분위 ${Number(props.rank) || 0} <small>(0 = 가장 쌈, 100 = 가장 비쌈)</small>`);
     if (price <= 0) lines.push('<i>공시지가가 함께 오지 않은 필지입니다 (도로·구거·국공유지 등)</i>');
     if (props.area) lines.push(`면적 ${Number(props.area).toLocaleString('ko-KR')}㎡`);
+
+    // ㎡당 금액만 보면 아파트 대지처럼 단가가 높은 땅이 터무니없이 비싸
+    // 보인다. 총액을 같이 내야 실제 규모가 가늠된다.
+    const total = formatTotal(price, props.area);
+    if (total) lines.push(`<b>필지 전체 약 ${total}</b> <small>(공시지가 × 면적, 땅값만)</small>`);
     return lines.join('<br>');
+  }
+
+  /** 마우스를 올리면 바로 보이는 한 줄. 클릭까지 가지 않아도 되게 한다. */
+  function parcelTooltip(props) {
+    const price = Number(props.price);
+    if (price <= 0) return props.jibun ? `${props.jibun} · 공시지가 없음` : '공시지가 없음';
+    return `${props.jibun ? props.jibun + ' · ' : ''}${formatPrice(price)}`;
+  }
+
+  /**
+   * 필지 위에 금액을 겹쳐 쓴다. 확대해서 보고 있고 개수가 많지 않을 때만
+   * 붙인다. 글자가 겹치면 색까지 못 읽게 되어 오히려 손해다.
+   */
+  function applyLabels() {
+    if (!parcelLayer) return;
+    const show =
+      priceLabelsEl.checked &&
+      map.getZoom() >= LABEL_MIN_ZOOM &&
+      parcelGeoJson &&
+      parcelGeoJson.features.length <= LABEL_MAX_COUNT;
+
+    parcelLayer.eachLayer((layer) => {
+      const props = layer.feature.properties;
+      layer.unbindTooltip();
+      const text = show ? labelPrice(props.price) : parcelTooltip(props);
+      if (!text) return;
+      layer.bindTooltip(text, {
+        permanent: show,
+        direction: 'center',
+        className: show ? 'parcel-label' : '',
+        opacity: show ? 1 : 0.95,
+      });
+    });
   }
 
   /** 받아 둔 필지에 색만 다시 입힌다. 기준을 바꿔도 다시 받지 않는다. */
@@ -194,6 +242,7 @@
     parcelScaleNote = priceScaleNote(styled);
     parcelLayer.setStyle(parcelStyle);
     parcelLayer.eachLayer((layer) => layer.setPopupContent(parcelPopup(layer.feature.properties)));
+    applyLabels();
     note(parcelStatus());
     renderLegend();
   }
@@ -280,6 +329,7 @@
         style: parcelStyle,
         onEachFeature: (f, layer) => layer.bindPopup(parcelPopup(f.properties)),
       }).addTo(map);
+      applyLabels();
       note(parcelStatus());
     } else if (result && result.failed) {
       parcelGeoJson = null;
@@ -404,6 +454,7 @@
   layerEl.addEventListener('change', () => setLayer(layerEl.value));
   parcelsEl.addEventListener('change', () => loadParcels(true));
   priceModeEl.addEventListener('change', restyleParcels);
+  priceLabelsEl.addEventListener('change', applyLabels);
   zoningEl.addEventListener('change', () => loadZoning(true));
   locateEl.addEventListener('click', locate);
 
@@ -413,6 +464,8 @@
     'moveend',
     debounce(() => {
       syncTo3dLink();
+      // 배율이 바뀌면 금액을 겹쳐 쓸 조건도 바뀐다. 조회와 별개로 매번 본다.
+      applyLabels();
       loadParcels(false);
       loadZoning(false);
     }, 400)
