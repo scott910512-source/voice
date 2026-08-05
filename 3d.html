@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D 지도</title>
+    <!--
+      GitHub Pages 의 Source 폴더가 / (root) 로 잡혀 있으면 앱은 /docs/ 아래에
+      있다. 그때 /3d.html 로 들어오면 404가 나는데, 주소를 잘못 안내하기 쉬운
+      경로라 여기에 진입점을 둔다. 쿼리스트링(위치)도 그대로 넘긴다.
+    -->
+    <script>
+      location.replace('./docs/3d.html' + location.search + location.hash);
+    </script>
+  </head>
+  <body>
+    <p>3D 지도를 여는 중입니다. 자동으로 넘어가지 않으면 <a href="./docs/3d.html">여기를 눌러 주세요</a>.</p>
+  </body>
+</html>

@@ -163,7 +163,7 @@ async function build() {
   const skipFetch = process.argv.includes('--no-fetch');
 
   let previous = null;
-  if (skipFetch && fs.existsSync(DATA_FILE)) {
+  if (fs.existsSync(DATA_FILE)) {
     const text = fs.readFileSync(DATA_FILE, 'utf8');
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
@@ -178,7 +178,17 @@ async function build() {
     console.log('기존 데이터가 없어 빈 데이터로 빌드합니다.');
     data = { generatedAt: null, meta: { counts: {} }, fields: [], signs: [] };
   } else {
-    data = await fetchData();
+    // 화면은 더 이상 도로안전표지 데이터를 쓰지 않는다(지도 인증키만 쓴다).
+    // 그래서 공공데이터 조회가 실패해도 빌드를 멈추지 않는다. 실패했다고
+    // 배포까지 막히면 지도조차 못 보게 된다.
+    try {
+      data = await fetchData();
+    } catch (error) {
+      console.log('');
+      console.log(`공공데이터 조회 실패: ${error.message}`);
+      console.log('화면은 이 데이터를 쓰지 않으므로 그대로 진행합니다.');
+      data = previous || { generatedAt: null, meta: { counts: {} }, fields: [], signs: [] };
+    }
   }
 
   if (fs.existsSync(DOCS_DIR)) fs.rmSync(DOCS_DIR, { recursive: true });
