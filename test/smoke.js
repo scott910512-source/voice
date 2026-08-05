@@ -430,11 +430,11 @@ test('값이 한 구간에 몰려도 화면 분포로 색이 갈린다', () => {
 
   const fixed = api.applyPriceColors(geojson, 'fixed');
   const fixedColors = new Set(geojson.features.map((f) => f.properties.color));
-  const auto = api.applyPriceColors(geojson, 'auto');
+  const auto = api.applyPriceColors(geojson, 'q8');
   const autoColors = new Set(geojson.features.map((f) => f.properties.color));
 
   assert.strictEqual(fixed.mode, 'fixed');
-  assert.strictEqual(auto.mode, 'auto');
+  assert.strictEqual(auto.mode, 'quantile');
   assert.ok(autoColors.size > fixedColors.size, '분포 기준이 고정 구간보다 잘게 갈려야 한다');
   assert.ok(auto.kinds.size >= 4, `범례가 너무 뭉뚱그려졌다: ${auto.kinds.size}칸`);
 
@@ -444,6 +444,58 @@ test('값이 한 구간에 몰려도 화면 분포로 색이 갈린다', () => {
   assert.strictEqual(geojson.features[0].properties.rank, 0, '가장 싼 필지는 0');
   assert.ok(geojson.features[prices.length - 1].properties.rank >= 87, '가장 비싼 필지는 상단');
   assert.ok(/최저 160만/.test(api.priceSummary(auto.stats)), api.priceSummary(auto.stats));
+  // 예전 이름으로 저장된 설정도 계속 동작해야 한다.
+  assert.strictEqual(api.applyPriceColors(geojson, 'auto').mode, 'quantile');
+});
+
+test('연속 방식은 필지마다 다른 색을 준다', () => {
+  const api = loadVWorldData();
+  const prices = [1600000, 1750000, 1900000, 2100000, 2400000, 2900000, 3600000, 4800000, 6200000, 8800000];
+  const geojson = {
+    type: 'FeatureCollection',
+    features: prices.map((price) => ({ type: 'Feature', properties: { price }, geometry: null })),
+  };
+
+  const q8 = api.applyPriceColors(geojson, 'q8');
+  const q8Colors = new Set(geojson.features.map((f) => f.properties.color)).size;
+  const smooth = api.applyPriceColors(geojson, 'smooth');
+  const smoothColors = new Set(geojson.features.map((f) => f.properties.color)).size;
+
+  assert.strictEqual(smooth.mode, 'smooth');
+  assert.strictEqual(smoothColors, prices.length, '값이 다르면 색도 달라야 한다');
+  assert.ok(smoothColors >= q8Colors, '연속이 단계보다 덜 갈리면 안 된다');
+  // 범례는 몇 지점만 뽑아 보여 준다. 필지마다 한 줄씩 낼 수는 없다.
+  assert.ok(smooth.kinds.size <= 6, `연속 범례가 너무 길다: ${smooth.kinds.size}`);
+});
+
+test('요청한 단계보다 값 종류가 적으면 이유를 알려 준다', () => {
+  const api = loadVWorldData();
+  // 서로 다른 금액이 셋뿐이라 16단계로 나눌 수 없다.
+  const geojson = {
+    type: 'FeatureCollection',
+    features: [100000, 100000, 200000, 200000, 300000].map((price) => ({
+      type: 'Feature',
+      properties: { price },
+      geometry: null,
+    })),
+  };
+  const styled = api.applyPriceColors(geojson, 'q16');
+  assert.ok(styled.buckets <= 3, `값 종류보다 많은 칸이 생겼다: ${styled.buckets}`);
+  assert.strictEqual(styled.stats.distinct, 3);
+
+  const note = api.priceScaleNote(styled);
+  assert.ok(/16단계/.test(note) && /3종류/.test(note), note);
+
+  // 충분히 나뉘었으면 굳이 알리지 않는다.
+  const wide = {
+    type: 'FeatureCollection',
+    features: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({
+      type: 'Feature',
+      properties: { price: n * 100000 },
+      geometry: null,
+    })),
+  };
+  assert.strictEqual(api.priceScaleNote(api.applyPriceColors(wide, 'q8')), '');
 });
 
 test('값이 하나뿐이거나 모두 같으면 고정 구간으로 되돌린다', () => {

@@ -24,8 +24,14 @@
   const priceModeEl = document.getElementById('pricemode2d');
   const legendEl = document.getElementById('legend2d');
 
-  const { fetchParcels, fetchZoning, applyPriceColors, priceSummary, formatPrice, areaGuard } =
+  const { fetchParcels, fetchZoning, applyPriceColors, priceSummary, priceScaleNote, formatPrice, areaGuard } =
     window.VWorldData;
+
+  const PRICE_TITLES = {
+    fixed: '공시지가 (고정 구간, 원/㎡)',
+    smooth: '공시지가 (이 화면 안 순위, 원/㎡)',
+    quantile: '공시지가 (이 화면 분포, 원/㎡)',
+  };
 
   /**
    * 겹쳐 보기 조회 범위.
@@ -63,6 +69,10 @@
   // 색 기준만 바꿀 때 다시 받지 않도록 받아 둔 필지를 들고 있는다.
   let parcelGeoJson = null;
   let parcelSummary = '';
+  let parcelScaleMode = 'quantile';
+  let parcelScaleNote = '';
+  let parcelRadius = 0;
+  let parcelCapped = false;
   let zoningCount = 0;
   const parcelGuard = areaGuard();
   const zoningGuard = areaGuard();
@@ -138,7 +148,7 @@
 
   function renderLegend() {
     legendEl.textContent = '';
-    const priceTitle = priceModeEl.value === 'fixed' ? '공시지가 (고정 구간, 원/㎡)' : '공시지가 (이 화면 안에서 비교, 원/㎡)';
+    const priceTitle = PRICE_TITLES[parcelScaleMode] || PRICE_TITLES.quantile;
     const zoneTitle = zoningCount ? `용도지역 (${zoningCount}구역)` : '용도지역';
     const groups = [legendGroup(priceTitle, parcelKinds), legendGroup(zoneTitle, zoningKinds)].filter(Boolean);
     groups.forEach((g) => legendEl.appendChild(g));
@@ -179,10 +189,30 @@
     if (!parcelGeoJson || !parcelLayer) return;
     const styled = applyPriceColors(parcelGeoJson, priceModeEl.value);
     parcelKinds = styled.kinds;
+    parcelScaleMode = styled.mode;
     parcelSummary = priceSummary(styled.stats);
+    parcelScaleNote = priceScaleNote(styled);
     parcelLayer.setStyle(parcelStyle);
     parcelLayer.eachLayer((layer) => layer.setPopupContent(parcelPopup(layer.feature.properties)));
+    note(parcelStatus());
     renderLegend();
+  }
+
+  /** 상태줄 문구를 한 곳에서 만든다. 조회 직후와 기준 변경 후가 같아야 한다. */
+  function parcelStatus() {
+    if (!parcelGeoJson) return '';
+    const total = parcelGeoJson.features.length;
+    const priced = parcelGeoJson.features.filter((f) => Number(f.properties.priced) === 1).length;
+    const missing = total - priced;
+    return [
+      `필지 ${total}개 · 공시지가 있는 필지 ${priced}개 (반경 ${parcelRadius}m)`,
+      parcelSummary,
+      parcelScaleNote,
+      missing ? `공시지가가 없는 필지 ${missing}개는 색을 채우지 않고 경계만 그립니다 (도로·구거·국공유지 등).` : '',
+      parcelCapped ? '한 번에 받을 수 있는 최대치라 일부가 빠졌을 수 있습니다. 확대해서 보세요.' : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   /** 보고 있는 화면을 덮는 반경. 반경 상자가 화면보다 조금 넓게 잡힌다. */
@@ -241,22 +271,16 @@
     if (result && result.geojson) {
       parcelGeoJson = result.geojson;
       parcelKinds = result.kinds;
+      parcelScaleMode = result.scaleMode;
       parcelSummary = priceSummary(result.stats);
+      parcelScaleNote = priceScaleNote({ ...result, mode: result.scaleMode });
+      parcelRadius = radius;
+      parcelCapped = !!result.capped;
       parcelLayer = L.geoJSON(result.geojson, {
         style: parcelStyle,
         onEachFeature: (f, layer) => layer.bindPopup(parcelPopup(f.properties)),
       }).addTo(map);
-      const missing = result.geojson.features.length - result.priced;
-      note(
-        [
-          `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (반경 ${radius}m)`,
-          parcelSummary,
-          missing ? `공시지가가 없는 필지 ${missing}개는 색을 채우지 않고 경계만 그립니다 (도로·구거·국공유지 등).` : '',
-          result.capped ? '한 번에 받을 수 있는 최대치라 일부가 빠졌을 수 있습니다. 확대해서 보세요.' : '',
-        ]
-          .filter(Boolean)
-          .join('\n')
-      );
+      note(parcelStatus());
     } else if (result && result.failed) {
       parcelGeoJson = null;
       parcelGuard.reset();

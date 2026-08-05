@@ -331,16 +331,50 @@
 
   function rampColor(index, count) {
     if (count <= 1) return PRICE_RAMP[PRICE_RAMP.length - 1];
-    return PRICE_RAMP[Math.round((index * (PRICE_RAMP.length - 1)) / (count - 1))];
+    return rampAt(index / (count - 1));
   }
 
-  const QUANTILE_BUCKETS = 8;
+  /** 램프 위의 임의 지점 색. 단계를 끊지 않고 이어서 쓸 때 필요하다. */
+  function rampAt(t) {
+    const x = Math.max(0, Math.min(1, t)) * (PRICE_RAMP.length - 1);
+    const i = Math.floor(x);
+    if (i >= PRICE_RAMP.length - 1) return PRICE_RAMP[PRICE_RAMP.length - 1];
+    return mixHex(PRICE_RAMP[i], PRICE_RAMP[i + 1], x - i);
+  }
+
+  function mixHex(a, b, f) {
+    const pa = parseInt(a.slice(1), 16);
+    const pb = parseInt(b.slice(1), 16);
+    const ch = (shift) => {
+      const va = (pa >> shift) & 255;
+      const vb = (pb >> shift) & 255;
+      return Math.round(va + (vb - va) * f);
+    };
+    return `#${((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1)}`;
+  }
+
+  /**
+   * 색 기준.
+   *
+   * 8단계로도 부족하다는 이야기가 나와 더 잘게 나누는 선택지와, 아예 단계를
+   * 끊지 않는 연속 방식을 뒀다. 다만 화면에 있는 공시지가 종류 자체가 적으면
+   * 어떤 방식으로도 더 나눌 수 없다 — 그때는 몇 종류인지 알려 준다.
+   */
+  const PRICE_MODES = {
+    q8: { buckets: 8 },
+    q16: { buckets: 16 },
+    smooth: { buckets: 0 },
+    fixed: { buckets: -1 },
+    // 예전 이름. 저장된 설정이나 링크가 남아 있을 수 있다.
+    auto: { buckets: 8 },
+  };
+
+  /** 연속 방식 범례는 몇 지점만 뽑아 보여 준다. 색은 그 사이를 이어서 쓴다. */
+  const SMOOTH_STOPS = [0, 0.25, 0.5, 0.75, 1];
 
   /**
    * 필지에 색을 입히고 범례·요약을 만든다. 다시 받지 않고 기준만 바꿀 수
    * 있도록 조회와 분리해 두었다.
-   *
-   * mode: 'auto' 화면 분포 기준 / 'fixed' 고정 구간
    */
   function applyPriceColors(geojson, mode) {
     const features = (geojson && geojson.features) || [];
@@ -349,10 +383,13 @@
       .filter((v) => Number.isFinite(v) && v > 0)
       .sort((a, b) => a - b);
 
+    const spec = PRICE_MODES[mode] || PRICE_MODES.q8;
     const kinds = new Map();
+    const distinct = new Set(sorted).size;
     const stats = sorted.length
       ? {
           count: sorted.length,
+          distinct,
           min: sorted[0],
           mid: sorted[Math.floor(sorted.length / 2)],
           max: sorted[sorted.length - 1],
@@ -360,7 +397,7 @@
       : null;
 
     // 값이 하나뿐이면 나눌 것이 없어 고정 구간으로 보여 준다.
-    const useQuantile = mode !== 'fixed' && sorted.length >= 2 && sorted[0] !== sorted[sorted.length - 1];
+    const useQuantile = spec.buckets >= 0 && sorted.length >= 2 && distinct >= 2;
 
     if (!useQuantile) {
       for (const feature of features) {
@@ -380,7 +417,28 @@
       return { kinds: ordered, stats, mode: 'fixed' };
     }
 
-    const edges = quantileEdges(sorted, QUANTILE_BUCKETS);
+    // 단계를 끊지 않는 연속 방식. 순위로 색을 매겨야 값이 한쪽에 쏠려도
+    // 색이 갈라진다. 금액에 비례해 칠하면 비싼 곳 한둘 때문에 나머지가
+    // 전부 같은 색이 된다.
+    if (spec.buckets === 0) {
+      for (const feature of features) {
+        const price = Number(feature.properties.price);
+        const rank = rankOf(sorted, price);
+        const priced = Number.isFinite(price) && price > 0;
+        feature.properties.priced = priced ? 1 : 0;
+        feature.properties.rank = priced ? rank : 0;
+        feature.properties.color = priced ? rampAt(rank / 100) : NO_PRICE_COLOR;
+        feature.properties.band = priced ? `${shortPrice(price)}` : '값 없음';
+      }
+      for (const t of SMOOTH_STOPS) {
+        const at = sorted[Math.min(sorted.length - 1, Math.round(t * (sorted.length - 1)))];
+        kinds.set(`${Math.round(t * 100)}% · ${shortPrice(at)}`, rampAt(t));
+      }
+      if (features.some((f) => f.properties.band === '값 없음')) kinds.set(NO_PRICE_LABEL, NO_PRICE_COLOR);
+      return { kinds, stats, mode: 'smooth' };
+    }
+
+    const edges = quantileEdges(sorted, spec.buckets);
     const count = edges.length + 1;
     const bounds = [sorted[0], ...edges, sorted[sorted.length - 1]];
 
@@ -408,7 +466,7 @@
       kinds.set(label, rampColor(i, count));
     }
     if (features.some((f) => f.properties.band === '값 없음')) kinds.set(NO_PRICE_LABEL, NO_PRICE_COLOR);
-    return { kinds, stats, mode: 'auto' };
+    return { kinds, stats, mode: 'quantile', buckets: count, asked: spec.buckets };
   }
 
   /** 이 화면 안에서 상위 몇 %인지. 100이면 가장 비싸다. */
@@ -421,7 +479,24 @@
   /** 상태줄에 넣을 한 줄 요약. */
   function priceSummary(stats) {
     if (!stats) return '';
-    return `최저 ${shortPrice(stats.min)} · 중앙 ${shortPrice(stats.mid)} · 최고 ${shortPrice(stats.max)} (원/㎡)`;
+    return (
+      `최저 ${shortPrice(stats.min)} · 중앙 ${shortPrice(stats.mid)} · 최고 ${shortPrice(stats.max)} (원/㎡)` +
+      ` · 서로 다른 금액 ${stats.distinct}종류`
+    );
+  }
+
+  /**
+   * 요청한 만큼 나누지 못했으면 그 이유를 알려 준다. 색이 덜 갈린 것이
+   * 설정 탓인지 데이터 탓인지 화면만 봐서는 알 수 없다.
+   */
+  function priceScaleNote(result) {
+    if (!result || !result.stats) return '';
+    if (result.mode === 'fixed') return '';
+    if (result.mode === 'smooth') return '';
+    if (result.asked && result.buckets < result.asked) {
+      return `${result.asked}단계를 요청했지만 이 화면의 공시지가가 ${result.stats.distinct}종류뿐이라 ${result.buckets}단계로 나뉘었습니다.`;
+    }
+    return '';
   }
 
   async function fetchParcels(vworldKey, point, radiusM, mode) {
@@ -455,6 +530,8 @@
       kinds: styled.kinds,
       stats: styled.stats,
       scaleMode: styled.mode,
+      buckets: styled.buckets,
+      asked: styled.asked,
       priced,
     };
   }
@@ -472,6 +549,7 @@
     fetchParcels,
     applyPriceColors,
     priceSummary,
+    priceScaleNote,
     formatPrice,
     shortPrice,
     priceStyle,

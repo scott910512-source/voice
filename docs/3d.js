@@ -218,6 +218,7 @@
     fetchParcels,
     applyPriceColors,
     priceSummary,
+    priceScaleNote,
     formatPrice,
     areaGuard,
     distanceM,
@@ -228,6 +229,12 @@
    * 너무 축소하면 아예 받지 않는다. 한 요청의 개수 상한 때문에 넓히면 일부만
    * 잘려 오는데, 그 상태가 아무 표시가 없는 것보다 나쁘다.
    */
+  const PRICE_TITLES = {
+    fixed: '공시지가 (고정 구간, 원/㎡)',
+    smooth: '공시지가 (이 화면 안 순위, 원/㎡)',
+    quantile: '공시지가 (이 화면 분포, 원/㎡)',
+  };
+
   const BUILDING_VIEW = { minZoom: 14, min: 400, max: 900 };
   const PARCEL_VIEW = { minZoom: 15, min: 250, max: 1200 };
   const ZONING_VIEW = { minZoom: 12, min: 400, max: 2500 };
@@ -467,6 +474,7 @@
     let zoningNote = '';
     let parcelNote = '';
     let parcelKinds = null;
+    let parcelScaleMode = 'quantile';
     let zoningKinds = null;
     let labelMarkers = [];
     const buildingGuard = areaGuard();
@@ -574,6 +582,9 @@
           `(${result.layer}, 반경 ${radius}m)` +
           (result.capped ? ' — 최대치라 일부 누락' : '') +
           (result.stats ? ` · ${priceSummary(result.stats)}` : '');
+        parcelScaleMode = result.scaleMode;
+        const scaleNote = priceScaleNote({ ...result, mode: result.scaleMode });
+        if (scaleNote) parcelNote += ` · ${scaleNote}`;
       } else {
         parcelGuard.reset();
         parcelGeoJson = null;
@@ -636,10 +647,7 @@
     function renderAllLegends() {
       if (!legendEl) return;
       legendEl.textContent = '';
-      const priceTitle =
-        priceModeEl && priceModeEl.value === 'fixed'
-          ? '공시지가 (고정 구간, 원/㎡)'
-          : '공시지가 (이 화면 안에서 비교, 원/㎡)';
+      const priceTitle = PRICE_TITLES[parcelScaleMode] || PRICE_TITLES.quantile;
       const groups = [legendGroup(priceTitle, parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
       groups.forEach((g) => legendEl.appendChild(g));
       legendEl.hidden = groups.length === 0;
@@ -840,6 +848,7 @@
         if (!parcelGeoJson) return;
         const styled = applyPriceColors(parcelGeoJson, priceModeEl.value);
         parcelKinds = styled.kinds;
+        parcelScaleMode = styled.mode;
         const source = map.getSource('parcel');
         if (source) source.setData(parcelGeoJson);
         renderAllLegends();
