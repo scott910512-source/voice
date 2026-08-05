@@ -30,6 +30,7 @@
   const to2dEl = document.getElementById('to-2d');
   const zoningEl = document.getElementById('zoning');
   const parcelsEl = document.getElementById('parcels');
+  const priceModeEl = document.getElementById('pricemode');
   const legendEl = document.getElementById('legend');
 
   let engine = null; // { kind: 'vworld' | 'maplibre', moveTo(point, tilt) }
@@ -210,8 +211,17 @@
   const OVERPASS = 'https://overpass-api.de/api/interpreter';
 
   // 용도지역·필지·공시지가 조회는 2D 화면과 함께 쓰는 공용 모듈에 있다.
-  const { pickField, fetchFeatures, fetchZoning, fetchParcels, formatPrice, areaGuard, distanceM } =
-    window.VWorldData;
+  const {
+    pickField,
+    fetchFeatures,
+    fetchZoning,
+    fetchParcels,
+    applyPriceColors,
+    priceSummary,
+    formatPrice,
+    areaGuard,
+    distanceM,
+  } = window.VWorldData;
 
   /**
    * 겹쳐 보기 조회 범위. 2D 화면과 같은 생각이다. 화면에 보이는 만큼만 받고,
@@ -542,7 +552,7 @@
       const token = parcelGuard.claim(at, radius, force);
       if (!token) return;
 
-      const result = await fetchParcels(vworldKey, at, radius);
+      const result = await fetchParcels(vworldKey, at, radius, priceModeEl ? priceModeEl.value : 'auto');
       if (!parcelGuard.fresh(token)) return; // 그 사이 지도가 더 움직였다.
 
       if (result && result.geojson) {
@@ -552,7 +562,8 @@
         parcelNote =
           `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 ` +
           `(${result.layer}, 반경 ${radius}m)` +
-          (result.capped ? ' — 최대치라 일부 누락' : '');
+          (result.capped ? ' — 최대치라 일부 누락' : '') +
+          (result.stats ? ` · ${priceSummary(result.stats)}` : '');
       } else {
         parcelGuard.reset();
         parcelGeoJson = null;
@@ -615,7 +626,11 @@
     function renderAllLegends() {
       if (!legendEl) return;
       legendEl.textContent = '';
-      const groups = [legendGroup('공시지가', parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
+      const priceTitle =
+        priceModeEl && priceModeEl.value === 'fixed'
+          ? '공시지가 (고정 구간, 원/㎡)'
+          : '공시지가 (이 화면 안에서 비교, 원/㎡)';
+      const groups = [legendGroup(priceTitle, parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
       groups.forEach((g) => legendEl.appendChild(g));
       legendEl.hidden = groups.length === 0;
     }
@@ -636,8 +651,12 @@
       const lines = [];
       if (parcel) {
         const p = parcel.properties;
+        const price = Number(p.price);
         lines.push(p.jibun ? `지번 ${p.jibun}` : '지번 미상');
-        lines.push(formatPrice(Number(p.price)) + (p.year ? ` · ${p.year}년 공시` : ''));
+        lines.push(formatPrice(price) + (p.year ? ` · ${p.year}년 공시` : ''));
+        // rank 0(가장 싼 필지)도 보여야 하므로 값 존재로 판단한다.
+        if (price > 0) lines.push(`이 화면 기준 백분위 ${Number(p.rank) || 0} (0 = 가장 쌈, 100 = 가장 비쌈)`);
+        if (price <= 0) lines.push('공시지가가 함께 오지 않은 필지입니다 (도로·구거·국공유지 등)');
         if (p.area) lines.push(`면적 ${Number(p.area).toLocaleString('ko-KR')}㎡`);
       }
       if (zone) lines.push(`${zone.properties.zone} (${zone.properties.group})`);
@@ -805,6 +824,16 @@
     }
     if (parcelsEl) {
       parcelsEl.addEventListener('change', () => loadParcels(true));
+    }
+    if (priceModeEl) {
+      priceModeEl.addEventListener('change', () => {
+        if (!parcelGeoJson) return;
+        const styled = applyPriceColors(parcelGeoJson, priceModeEl.value);
+        parcelKinds = styled.kinds;
+        const source = map.getSource('parcel');
+        if (source) source.setData(parcelGeoJson);
+        renderAllLegends();
+      });
     }
 
     /** 2D로 넘어갈 때 지금 보고 있는 자리를 그대로 이어 간다. */

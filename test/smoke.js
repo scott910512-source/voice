@@ -399,11 +399,13 @@ test('공시지가 표기는 원/㎡와 평당을 함께 낸다', () => {
   assert.strictEqual(api.formatPrice(null), '공시지가 없음');
 });
 
-test('공시지가 구간과 용도지역 갈래를 올바르게 나눈다', () => {
+test('공시지가 고정 구간과 용도지역 갈래를 올바르게 나눈다', () => {
   const api = loadVWorldData();
-  assert.strictEqual(api.priceStyle(32000).label, '5만원 미만');
-  assert.strictEqual(api.priceStyle(240000).label, '15~50만원');
-  assert.strictEqual(api.priceStyle(2100000).label, '150만원 이상');
+  assert.strictEqual(api.priceStyle(32000).label, '5만 미만');
+  assert.strictEqual(api.priceStyle(240000).label, '15~30만');
+  // 위쪽이 '150만 이상' 한 칸이면 값이 높은 지역에서 전부 같은 색이 된다.
+  assert.strictEqual(api.priceStyle(2100000).label, '150~300만');
+  assert.strictEqual(api.priceStyle(50000000).label, '1000만 이상');
   assert.strictEqual(api.priceStyle(0).label, '값 없음');
 
   assert.strictEqual(api.zoneStyle('일반공업지역').label, '공업지역');
@@ -411,7 +413,60 @@ test('공시지가 구간과 용도지역 갈래를 올바르게 나눈다', () 
   assert.strictEqual(api.zoneStyle('자연녹지지역').label, '녹지지역');
   // 주거를 포함하는 준주거도 주거로 묶여야 한다.
   assert.strictEqual(api.zoneStyle('준주거지역').label, '주거지역');
-  assert.strictEqual(api.zoneStyle('처음 보는 지정').label, '기타');
+  // 회색이 되는 두 경우는 원인이 달라 범례에서도 갈라야 한다.
+  assert.strictEqual(api.zoneStyle('처음 보는 지정').label, '기타 지정');
+  assert.strictEqual(api.zoneStyle('').label, '이름 없음');
+  assert.strictEqual(api.zoneStyle(null).label, '이름 없음');
+});
+
+test('값이 한 구간에 몰려도 화면 분포로 색이 갈린다', () => {
+  const api = loadVWorldData();
+  // 전부 고정 구간의 맨 윗칸(150만 이상)에 드는 값들.
+  const prices = [1600000, 1800000, 2000000, 2400000, 3000000, 4000000, 6000000, 9000000];
+  const geojson = {
+    type: 'FeatureCollection',
+    features: prices.map((price) => ({ type: 'Feature', properties: { price }, geometry: null })),
+  };
+
+  const fixed = api.applyPriceColors(geojson, 'fixed');
+  const fixedColors = new Set(geojson.features.map((f) => f.properties.color));
+  const auto = api.applyPriceColors(geojson, 'auto');
+  const autoColors = new Set(geojson.features.map((f) => f.properties.color));
+
+  assert.strictEqual(fixed.mode, 'fixed');
+  assert.strictEqual(auto.mode, 'auto');
+  assert.ok(autoColors.size > fixedColors.size, '분포 기준이 고정 구간보다 잘게 갈려야 한다');
+  assert.ok(auto.kinds.size >= 4, `범례가 너무 뭉뚱그려졌다: ${auto.kinds.size}칸`);
+
+  // 요약과 순위가 화면에 쓸 수 있는 형태로 나와야 한다.
+  assert.strictEqual(auto.stats.min, 1600000);
+  assert.strictEqual(auto.stats.max, 9000000);
+  assert.strictEqual(geojson.features[0].properties.rank, 0, '가장 싼 필지는 0');
+  assert.ok(geojson.features[prices.length - 1].properties.rank >= 87, '가장 비싼 필지는 상단');
+  assert.ok(/최저 160만/.test(api.priceSummary(auto.stats)), api.priceSummary(auto.stats));
+});
+
+test('값이 하나뿐이거나 모두 같으면 고정 구간으로 되돌린다', () => {
+  const api = loadVWorldData();
+  const same = {
+    type: 'FeatureCollection',
+    features: [240000, 240000, 240000].map((price) => ({ type: 'Feature', properties: { price }, geometry: null })),
+  };
+  // 같은 값만 있으면 분위로 나눌 것이 없다. 억지로 나누면 같은 금액이 다른 색이 된다.
+  assert.strictEqual(api.applyPriceColors(same, 'auto').mode, 'fixed');
+});
+
+test('공시지가가 없는 필지는 값 없음으로 따로 센다', () => {
+  const api = loadVWorldData();
+  const geojson = {
+    type: 'FeatureCollection',
+    features: [100000, 0, 300000, 0].map((price) => ({ type: 'Feature', properties: { price }, geometry: null })),
+  };
+  const styled = api.applyPriceColors(geojson, 'auto');
+  assert.strictEqual(styled.stats.count, 2, '값 있는 필지만 요약에 넣어야 한다');
+  assert.ok(styled.kinds.has('값 없음'));
+  assert.strictEqual(geojson.features[1].properties.band, '값 없음');
+  assert.strictEqual(geojson.features[1].properties.color, '#cbd5e1');
 });
 
 test('필지 조회가 화면이 쓰는 속성을 그대로 돌려준다', async () => {
@@ -439,13 +494,14 @@ test('필지 조회가 화면이 쓰는 속성을 그대로 돌려준다', async
   assert.strictEqual(result.priced, 1, '공시지가가 있는 필지만 세어야 한다');
 
   const props = result.geojson.features[0].properties;
-  for (const key of ['color', 'price', 'jibun', 'area', 'year']) {
+  for (const key of ['color', 'price', 'jibun', 'area', 'year', 'band', 'rank']) {
     assert.ok(key in props, `화면이 쓰는 속성 ${key} 가 없다`);
   }
   assert.strictEqual(props.price, 240000);
   assert.strictEqual(props.jibun, '내판리 715');
-  // 범례는 금액 순서여야 읽힌다.
-  assert.deepStrictEqual([...result.kinds.keys()], ['15~50만원', '값 없음']);
+  // 값이 하나뿐이라 고정 구간으로 떨어진다. 범례는 금액 순서여야 읽힌다.
+  assert.deepStrictEqual([...result.kinds.keys()], ['15~30만', '값 없음']);
+  assert.strictEqual(result.stats.count, 1);
 });
 
 test('용도지역 조회가 화면이 쓰는 속성을 그대로 돌려준다', async () => {

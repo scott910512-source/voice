@@ -21,9 +21,11 @@
   const to3dEl = document.getElementById('to-3d');
   const parcelsEl = document.getElementById('parcels2d');
   const zoningEl = document.getElementById('zoning2d');
+  const priceModeEl = document.getElementById('pricemode2d');
   const legendEl = document.getElementById('legend2d');
 
-  const { fetchParcels, fetchZoning, formatPrice, areaGuard } = window.VWorldData;
+  const { fetchParcels, fetchZoning, applyPriceColors, priceSummary, formatPrice, areaGuard } =
+    window.VWorldData;
 
   /**
    * 겹쳐 보기 조회 범위.
@@ -58,6 +60,9 @@
   let zoningLayer = null;
   let parcelKinds = null;
   let zoningKinds = null;
+  // 색 기준만 바꿀 때 다시 받지 않도록 받아 둔 필지를 들고 있는다.
+  let parcelGeoJson = null;
+  let parcelSummary = '';
   const parcelGuard = areaGuard();
   const zoningGuard = areaGuard();
 
@@ -132,17 +137,38 @@
 
   function renderLegend() {
     legendEl.textContent = '';
-    const groups = [legendGroup('공시지가', parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
+    const priceTitle = priceModeEl.value === 'fixed' ? '공시지가 (고정 구간, 원/㎡)' : '공시지가 (이 화면 안에서 비교, 원/㎡)';
+    const groups = [legendGroup(priceTitle, parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
     groups.forEach((g) => legendEl.appendChild(g));
     legendEl.hidden = groups.length === 0;
   }
 
   /** 필지를 클릭하면 지번·공시지가·면적을 띄운다. */
   function parcelPopup(props) {
+    const price = Number(props.price);
     const lines = [props.jibun ? `<b>지번 ${props.jibun}</b>` : '<b>지번 미상</b>'];
-    lines.push(formatPrice(Number(props.price)) + (props.year ? ` · ${props.year}년 공시` : ''));
+    lines.push(formatPrice(price) + (props.year ? ` · ${props.year}년 공시` : ''));
+    // rank 0(가장 싼 필지)도 보여야 하므로 값 존재로 판단한다.
+    if (price > 0) lines.push(`이 화면 기준 백분위 ${Number(props.rank) || 0} <small>(0 = 가장 쌈, 100 = 가장 비쌈)</small>`);
+    if (price <= 0) lines.push('<i>공시지가가 함께 오지 않은 필지입니다 (도로·구거·국공유지 등)</i>');
     if (props.area) lines.push(`면적 ${Number(props.area).toLocaleString('ko-KR')}㎡`);
     return lines.join('<br>');
+  }
+
+  /** 받아 둔 필지에 색만 다시 입힌다. 기준을 바꿔도 다시 받지 않는다. */
+  function restyleParcels() {
+    if (!parcelGeoJson || !parcelLayer) return;
+    const styled = applyPriceColors(parcelGeoJson, priceModeEl.value);
+    parcelKinds = styled.kinds;
+    parcelSummary = priceSummary(styled.stats);
+    parcelLayer.setStyle((f) => ({
+      color: '#475569',
+      weight: 0.6,
+      fillColor: f.properties.color,
+      fillOpacity: 0.55,
+    }));
+    parcelLayer.eachLayer((layer) => layer.setPopupContent(parcelPopup(layer.feature.properties)));
+    renderLegend();
   }
 
   /** 보고 있는 화면을 덮는 반경. 반경 상자가 화면보다 조금 넓게 잡힌다. */
@@ -170,6 +196,7 @@
         parcelLayer = null;
       }
       parcelKinds = null;
+      parcelGeoJson = null;
     };
 
     if (!parcelsEl.checked) {
@@ -192,22 +219,32 @@
     if (!token) return; // 조금 움직인 정도라 이미 받아 둔 것으로 충분하다.
 
     note('필지·공시지가를 받는 중…');
-    const result = await fetchParcels(vworldKey, center, radius);
+    const result = await fetchParcels(vworldKey, center, radius, priceModeEl.value);
     // 응답을 기다리는 사이 지도가 더 움직였으면 늦은 결과는 버린다.
     if (!parcelGuard.fresh(token)) return;
 
     clear();
     if (result && result.geojson) {
+      parcelGeoJson = result.geojson;
       parcelKinds = result.kinds;
+      parcelSummary = priceSummary(result.stats);
       parcelLayer = L.geoJSON(result.geojson, {
         style: (f) => ({ color: '#475569', weight: 0.6, fillColor: f.properties.color, fillOpacity: 0.55 }),
         onEachFeature: (f, layer) => layer.bindPopup(parcelPopup(f.properties)),
       }).addTo(map);
+      const missing = result.geojson.features.length - result.priced;
       note(
-        `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (반경 ${radius}m)` +
-          (result.capped ? '\n한 번에 받을 수 있는 최대치라 일부가 빠졌을 수 있습니다. 확대해서 보세요.' : '')
+        [
+          `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (반경 ${radius}m)`,
+          parcelSummary,
+          missing ? `공시지가가 없는 필지 ${missing}개는 회색입니다 (도로·구거·국공유지 등).` : '',
+          result.capped ? '한 번에 받을 수 있는 최대치라 일부가 빠졌을 수 있습니다. 확대해서 보세요.' : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
       );
     } else if (result && result.failed) {
+      parcelGeoJson = null;
       parcelGuard.reset();
       note(`필지를 받지 못했습니다: ${result.failed.join(' / ')}`, 'error');
     }
@@ -320,6 +357,7 @@
 
   layerEl.addEventListener('change', () => setLayer(layerEl.value));
   parcelsEl.addEventListener('change', () => loadParcels(true));
+  priceModeEl.addEventListener('change', restyleParcels);
   zoningEl.addEventListener('change', () => loadZoning(true));
   locateEl.addEventListener('click', locate);
 

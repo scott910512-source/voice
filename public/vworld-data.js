@@ -200,9 +200,17 @@
     { test: /자연환경보전/, label: '자연환경보전', color: '#3f7f7a' },
   ];
 
+  /**
+   * 회색으로 남는 두 경우를 갈라 둔다. 하나는 '이름은 왔는데 우리 분류표에
+   * 없는 지정'이고, 다른 하나는 '이름 자체가 안 온 것'이다. 원인이 다르니
+   * 범례에서도 달라야 한다. 아예 폴리곤이 없는 자리는 이 함수까지 오지도
+   * 않는다 — 그건 용도지역이 지정되지 않았거나 자료가 없는 땅이다.
+   */
   function zoneStyle(name) {
-    const hit = ZONE_COLORS.find((z) => z.test.test(String(name || '')));
-    return hit || { label: '기타', color: '#94a3b8' };
+    const text = String(name || '').trim();
+    if (!text) return { label: '이름 없음', color: '#cbd5e1' };
+    const hit = ZONE_COLORS.find((z) => z.test.test(text));
+    return hit || { label: '기타 지정', color: '#94a3b8' };
   }
 
   async function fetchZoning(vworldKey, point, radiusM) {
@@ -243,18 +251,42 @@
   const AREA_FIELDS = ['lndpcl_ar', 'area', 'ar', '면적'];
   const YEAR_FIELDS = ['jiga_year', 'stdr_year', 'base_year', '공시년도'];
 
-  /** 공시지가 구간별 색. 원/㎡ 기준. */
+  /** 낮은 값 → 높은 값. 두 방식(고정·분포)이 같은 램프를 쓴다. */
+  const PRICE_RAMP = [
+    '#fff7ec',
+    '#fee8c8',
+    '#fdd49e',
+    '#fdbb84',
+    '#fc8d59',
+    '#ef6548',
+    '#d7301f',
+    '#b30000',
+    '#7f0000',
+  ];
+  const NO_PRICE_COLOR = '#cbd5e1';
+
+  /**
+   * 고정 구간. 원/㎡ 기준.
+   *
+   * 처음에는 다섯 칸이었는데 맨 위가 '150만원 이상'이라, 값이 고르게 높은
+   * 곳에서는 화면 전체가 한 색이 됐다. 위쪽을 갈라 아홉 칸으로 늘렸다.
+   */
   const PRICE_BREAKS = [
-    { max: 50000, label: '5만원 미만', color: '#fee8c8' },
-    { max: 150000, label: '5~15만원', color: '#fdbb84' },
-    { max: 500000, label: '15~50만원', color: '#fc8d59' },
-    { max: 1500000, label: '50~150만원', color: '#e34a33' },
-    { max: Infinity, label: '150만원 이상', color: '#b30000' },
+    { max: 50000, label: '5만 미만' },
+    { max: 150000, label: '5~15만' },
+    { max: 300000, label: '15~30만' },
+    { max: 500000, label: '30~50만' },
+    { max: 1000000, label: '50~100만' },
+    { max: 1500000, label: '100~150만' },
+    { max: 3000000, label: '150~300만' },
+    { max: 10000000, label: '300~1000만' },
+    { max: Infinity, label: '1000만 이상' },
   ];
 
   function priceStyle(value) {
-    if (!Number.isFinite(value) || value <= 0) return { label: '값 없음', color: '#cbd5e1' };
-    return PRICE_BREAKS.find((b) => value < b.max);
+    if (!Number.isFinite(value) || value <= 0) return { label: '값 없음', color: NO_PRICE_COLOR };
+    const index = PRICE_BREAKS.findIndex((b) => value < b.max);
+    return { label: PRICE_BREAKS[index].label, color: PRICE_RAMP[index] };
   }
 
   /** 원/㎡ 를 사람이 읽는 형태로. 국내 실무는 평당으로도 본다. */
@@ -264,22 +296,139 @@
     return `${value.toLocaleString('ko-KR')}원/㎡ (평당 ${perPyeong.toLocaleString('ko-KR')}원)`;
   }
 
-  async function fetchParcels(vworldKey, point, radiusM) {
+  /** 범례에 넣을 짧은 표기. 12,300 → 1.2만 */
+  function shortPrice(value) {
+    if (!Number.isFinite(value)) return '-';
+    if (value >= 100000000) return `${trimZero(value / 100000000, 1)}억`;
+    if (value >= 10000) return `${trimZero(value / 10000, value >= 1000000 ? 0 : 1)}만`;
+    return Math.round(value).toLocaleString('ko-KR');
+  }
+
+  function trimZero(value, digits) {
+    return value.toFixed(digits).replace(/\.0$/, '');
+  }
+
+  /**
+   * 화면에 있는 값의 분포로 구간을 나눈다.
+   *
+   * 고정 구간은 지역이 바뀌면 한 칸에 다 몰린다. 세종 산업단지처럼 값이
+   * 고르게 높은 곳에서는 전부 맨 윗칸이 되어 색으로 구분이 되지 않았다.
+   * 분위로 나누면 어디를 보든 색이 갈라지고, 그 화면 안에서 어디가 비싼지
+   * 바로 보인다. 대신 지도를 옮기면 같은 금액이라도 색이 달라질 수 있다.
+   */
+  function quantileEdges(sorted, buckets) {
+    const edges = [];
+    for (let i = 1; i < buckets; i += 1) {
+      const at = Math.floor((sorted.length * i) / buckets);
+      const value = sorted[Math.min(sorted.length - 1, at)];
+      // 같은 값이 많으면 경계가 겹친다. 겹친 칸은 합친다.
+      if (value > sorted[0] && edges[edges.length - 1] !== value) edges.push(value);
+    }
+    return edges;
+  }
+
+  function rampColor(index, count) {
+    if (count <= 1) return PRICE_RAMP[PRICE_RAMP.length - 1];
+    return PRICE_RAMP[Math.round((index * (PRICE_RAMP.length - 1)) / (count - 1))];
+  }
+
+  const QUANTILE_BUCKETS = 8;
+
+  /**
+   * 필지에 색을 입히고 범례·요약을 만든다. 다시 받지 않고 기준만 바꿀 수
+   * 있도록 조회와 분리해 두었다.
+   *
+   * mode: 'auto' 화면 분포 기준 / 'fixed' 고정 구간
+   */
+  function applyPriceColors(geojson, mode) {
+    const features = (geojson && geojson.features) || [];
+    const sorted = features
+      .map((f) => Number(f.properties.price))
+      .filter((v) => Number.isFinite(v) && v > 0)
+      .sort((a, b) => a - b);
+
+    const kinds = new Map();
+    const stats = sorted.length
+      ? {
+          count: sorted.length,
+          min: sorted[0],
+          mid: sorted[Math.floor(sorted.length / 2)],
+          max: sorted[sorted.length - 1],
+        }
+      : null;
+
+    // 값이 하나뿐이면 나눌 것이 없어 고정 구간으로 보여 준다.
+    const useQuantile = mode !== 'fixed' && sorted.length >= 2 && sorted[0] !== sorted[sorted.length - 1];
+
+    if (!useQuantile) {
+      for (const feature of features) {
+        const style = priceStyle(Number(feature.properties.price));
+        feature.properties.color = style.color;
+        feature.properties.band = style.label;
+        feature.properties.rank = rankOf(sorted, Number(feature.properties.price));
+      }
+      const ordered = new Map();
+      PRICE_BREAKS.forEach((b, i) => {
+        if (features.some((f) => f.properties.band === b.label)) ordered.set(b.label, PRICE_RAMP[i]);
+      });
+      if (features.some((f) => f.properties.band === '값 없음')) ordered.set('값 없음', NO_PRICE_COLOR);
+      return { kinds: ordered, stats, mode: 'fixed' };
+    }
+
+    const edges = quantileEdges(sorted, QUANTILE_BUCKETS);
+    const count = edges.length + 1;
+    const bounds = [sorted[0], ...edges, sorted[sorted.length - 1]];
+
+    for (const feature of features) {
+      const price = Number(feature.properties.price);
+      if (!Number.isFinite(price) || price <= 0) {
+        feature.properties.color = NO_PRICE_COLOR;
+        feature.properties.band = '값 없음';
+        feature.properties.rank = 0;
+        continue;
+      }
+      const index = edges.filter((e) => price >= e).length;
+      feature.properties.color = rampColor(index, count);
+      feature.properties.band =
+        index === count - 1
+          ? `${shortPrice(bounds[index])} 이상`
+          : `${shortPrice(bounds[index])}~${shortPrice(bounds[index + 1])}`;
+      feature.properties.rank = rankOf(sorted, price);
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const label = i === count - 1 ? `${shortPrice(bounds[i])} 이상` : `${shortPrice(bounds[i])}~${shortPrice(bounds[i + 1])}`;
+      kinds.set(label, rampColor(i, count));
+    }
+    if (features.some((f) => f.properties.band === '값 없음')) kinds.set('값 없음', NO_PRICE_COLOR);
+    return { kinds, stats, mode: 'auto' };
+  }
+
+  /** 이 화면 안에서 상위 몇 %인지. 100이면 가장 비싸다. */
+  function rankOf(sorted, price) {
+    if (!sorted.length || !Number.isFinite(price) || price <= 0) return 0;
+    const below = sorted.filter((v) => v < price).length;
+    return Math.round((below / sorted.length) * 100);
+  }
+
+  /** 상태줄에 넣을 한 줄 요약. */
+  function priceSummary(stats) {
+    if (!stats) return '';
+    return `최저 ${shortPrice(stats.min)} · 중앙 ${shortPrice(stats.mid)} · 최고 ${shortPrice(stats.max)} (원/㎡)`;
+  }
+
+  async function fetchParcels(vworldKey, point, radiusM, mode) {
     const found = await fetchFeatures('parcel', VWORLD_PARCEL_LAYERS, vworldKey, point, radiusM);
     if (!found || !found.features) return found;
 
-    const kinds = new Map();
     let priced = 0;
     const out = found.features.map((feature) => {
       const props = feature.properties || {};
       const price = Number(String(pickField(props, PRICE_FIELDS) ?? '').replace(/[^\d.]/g, ''));
-      const style = priceStyle(price);
       if (Number.isFinite(price) && price > 0) priced += 1;
-      kinds.set(style.label, style.color);
       return {
         type: 'Feature',
         properties: {
-          color: style.color,
           price: Number.isFinite(price) ? price : 0,
           jibun: String(pickField(props, JIBUN_FIELDS) ?? ''),
           area: String(pickField(props, AREA_FIELDS) ?? ''),
@@ -289,16 +438,16 @@
       };
     });
 
-    // 범례는 금액 순서대로 보여야 읽힌다.
-    const ordered = new Map();
-    for (const b of PRICE_BREAKS) if (kinds.has(b.label)) ordered.set(b.label, b.color);
-    if (kinds.has('값 없음')) ordered.set('값 없음', '#cbd5e1');
+    const geojson = { type: 'FeatureCollection', features: out };
+    const styled = applyPriceColors(geojson, mode);
 
     return {
-      geojson: { type: 'FeatureCollection', features: out },
+      geojson,
       layer: found.layer,
       capped: found.capped,
-      kinds: ordered,
+      kinds: styled.kinds,
+      stats: styled.stats,
+      scaleMode: styled.mode,
       priced,
     };
   }
@@ -314,7 +463,10 @@
     fetchFeatures,
     fetchZoning,
     fetchParcels,
+    applyPriceColors,
+    priceSummary,
     formatPrice,
+    shortPrice,
     priceStyle,
     zoneStyle,
     PRICE_BREAKS,
