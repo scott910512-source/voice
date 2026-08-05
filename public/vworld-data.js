@@ -264,6 +264,8 @@
     '#7f0000',
   ];
   const NO_PRICE_COLOR = '#cbd5e1';
+  // 공시지가가 없는 필지도 경계는 그린다. 색을 채우지 않을 뿐이다.
+  const NO_PRICE_LABEL = '공시지가 없음 (경계만)';
 
   /**
    * 고정 구간. 원/㎡ 기준.
@@ -362,16 +364,19 @@
 
     if (!useQuantile) {
       for (const feature of features) {
-        const style = priceStyle(Number(feature.properties.price));
+        const price = Number(feature.properties.price);
+        const style = priceStyle(price);
         feature.properties.color = style.color;
         feature.properties.band = style.label;
-        feature.properties.rank = rankOf(sorted, Number(feature.properties.price));
+        feature.properties.rank = rankOf(sorted, price);
+        // 값이 없어도 필지 경계는 보여야 한다. 색만 비우고 테두리는 그대로 둔다.
+        feature.properties.priced = price > 0 ? 1 : 0;
       }
       const ordered = new Map();
       PRICE_BREAKS.forEach((b, i) => {
         if (features.some((f) => f.properties.band === b.label)) ordered.set(b.label, PRICE_RAMP[i]);
       });
-      if (features.some((f) => f.properties.band === '값 없음')) ordered.set('값 없음', NO_PRICE_COLOR);
+      if (features.some((f) => f.properties.band === '값 없음')) ordered.set(NO_PRICE_LABEL, NO_PRICE_COLOR);
       return { kinds: ordered, stats, mode: 'fixed' };
     }
 
@@ -385,8 +390,10 @@
         feature.properties.color = NO_PRICE_COLOR;
         feature.properties.band = '값 없음';
         feature.properties.rank = 0;
+        feature.properties.priced = 0;
         continue;
       }
+      feature.properties.priced = 1;
       const index = edges.filter((e) => price >= e).length;
       feature.properties.color = rampColor(index, count);
       feature.properties.band =
@@ -400,7 +407,7 @@
       const label = i === count - 1 ? `${shortPrice(bounds[i])} 이상` : `${shortPrice(bounds[i])}~${shortPrice(bounds[i + 1])}`;
       kinds.set(label, rampColor(i, count));
     }
-    if (features.some((f) => f.properties.band === '값 없음')) kinds.set('값 없음', NO_PRICE_COLOR);
+    if (features.some((f) => f.properties.band === '값 없음')) kinds.set(NO_PRICE_LABEL, NO_PRICE_COLOR);
     return { kinds, stats, mode: 'auto' };
   }
 

@@ -505,8 +505,18 @@
 
       map.addSource('parcel', { type: 'geojson', data: geojson });
       const below = map.getLayer('zoning-fill') ? 'zoning-fill' : map.getLayer('buildings-3d') ? 'buildings-3d' : undefined;
+      // 공시지가가 없는 필지도 경계는 똑같이 또렷해야 한다. 회색으로 덮으면
+      // 경계까지 뭉개져 '필지가 없는 땅'처럼 보인다. 색은 가격만 나타낸다.
       map.addLayer(
-        { id: 'parcel-fill', type: 'fill', source: 'parcel', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.55 } },
+        {
+          id: 'parcel-fill',
+          type: 'fill',
+          source: 'parcel',
+          paint: {
+            'fill-color': ['get', 'color'],
+            'fill-opacity': ['case', ['==', ['get', 'priced'], 1], 0.55, 0.05],
+          },
+        },
         below
       );
       map.addLayer(
@@ -514,7 +524,7 @@
           id: 'parcel-line',
           type: 'line',
           source: 'parcel',
-          paint: { 'line-color': '#475569', 'line-width': 0.6, 'line-opacity': 0.7 },
+          paint: { 'line-color': '#334155', 'line-width': 1, 'line-opacity': 0.85 },
         },
         below
       );

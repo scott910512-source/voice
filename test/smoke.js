@@ -464,9 +464,12 @@ test('공시지가가 없는 필지는 값 없음으로 따로 센다', () => {
   };
   const styled = api.applyPriceColors(geojson, 'auto');
   assert.strictEqual(styled.stats.count, 2, '값 있는 필지만 요약에 넣어야 한다');
-  assert.ok(styled.kinds.has('값 없음'));
+  assert.ok(styled.kinds.has('공시지가 없음 (경계만)'));
   assert.strictEqual(geojson.features[1].properties.band, '값 없음');
   assert.strictEqual(geojson.features[1].properties.color, '#cbd5e1');
+  // 값이 없어도 필지 경계는 그려야 한다. 화면은 priced 로 채움만 뺀다.
+  assert.strictEqual(geojson.features[1].properties.priced, 0);
+  assert.strictEqual(geojson.features[0].properties.priced, 1);
 });
 
 test('필지 조회가 화면이 쓰는 속성을 그대로 돌려준다', async () => {
@@ -500,7 +503,7 @@ test('필지 조회가 화면이 쓰는 속성을 그대로 돌려준다', async
   assert.strictEqual(props.price, 240000);
   assert.strictEqual(props.jibun, '내판리 715');
   // 값이 하나뿐이라 고정 구간으로 떨어진다. 범례는 금액 순서여야 읽힌다.
-  assert.deepStrictEqual([...result.kinds.keys()], ['15~30만', '값 없음']);
+  assert.deepStrictEqual([...result.kinds.keys()], ['15~30만', '공시지가 없음 (경계만)']);
   assert.strictEqual(result.stats.count, 1);
 });
 

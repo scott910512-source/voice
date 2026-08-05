@@ -63,6 +63,7 @@
   // 색 기준만 바꿀 때 다시 받지 않도록 받아 둔 필지를 들고 있는다.
   let parcelGeoJson = null;
   let parcelSummary = '';
+  let zoningCount = 0;
   const parcelGuard = areaGuard();
   const zoningGuard = areaGuard();
 
@@ -138,9 +139,27 @@
   function renderLegend() {
     legendEl.textContent = '';
     const priceTitle = priceModeEl.value === 'fixed' ? '공시지가 (고정 구간, 원/㎡)' : '공시지가 (이 화면 안에서 비교, 원/㎡)';
-    const groups = [legendGroup(priceTitle, parcelKinds), legendGroup('용도지역', zoningKinds)].filter(Boolean);
+    const zoneTitle = zoningCount ? `용도지역 (${zoningCount}구역)` : '용도지역';
+    const groups = [legendGroup(priceTitle, parcelKinds), legendGroup(zoneTitle, zoningKinds)].filter(Boolean);
     groups.forEach((g) => legendEl.appendChild(g));
     legendEl.hidden = groups.length === 0;
+  }
+
+  /**
+   * 필지 경계는 공시지가가 있든 없든 똑같이 또렷해야 한다. 도로·구거·
+   * 국공유지처럼 공시지가가 없는 필지를 회색으로 덮어 버리면 경계도 같이
+   * 뭉개져 '필지가 없는 땅'처럼 보인다. 색은 가격만 나타내고, 값이 없으면
+   * 채우지 않는다.
+   */
+  function parcelStyle(feature) {
+    const priced = Number(feature.properties.priced) === 1;
+    return {
+      color: '#334155',
+      weight: 1,
+      opacity: 0.85,
+      fillColor: feature.properties.color,
+      fillOpacity: priced ? 0.55 : 0.05,
+    };
   }
 
   /** 필지를 클릭하면 지번·공시지가·면적을 띄운다. */
@@ -161,12 +180,7 @@
     const styled = applyPriceColors(parcelGeoJson, priceModeEl.value);
     parcelKinds = styled.kinds;
     parcelSummary = priceSummary(styled.stats);
-    parcelLayer.setStyle((f) => ({
-      color: '#475569',
-      weight: 0.6,
-      fillColor: f.properties.color,
-      fillOpacity: 0.55,
-    }));
+    parcelLayer.setStyle(parcelStyle);
     parcelLayer.eachLayer((layer) => layer.setPopupContent(parcelPopup(layer.feature.properties)));
     renderLegend();
   }
@@ -229,7 +243,7 @@
       parcelKinds = result.kinds;
       parcelSummary = priceSummary(result.stats);
       parcelLayer = L.geoJSON(result.geojson, {
-        style: (f) => ({ color: '#475569', weight: 0.6, fillColor: f.properties.color, fillOpacity: 0.55 }),
+        style: parcelStyle,
         onEachFeature: (f, layer) => layer.bindPopup(parcelPopup(f.properties)),
       }).addTo(map);
       const missing = result.geojson.features.length - result.priced;
@@ -237,7 +251,7 @@
         [
           `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (반경 ${radius}m)`,
           parcelSummary,
-          missing ? `공시지가가 없는 필지 ${missing}개는 회색입니다 (도로·구거·국공유지 등).` : '',
+          missing ? `공시지가가 없는 필지 ${missing}개는 색을 채우지 않고 경계만 그립니다 (도로·구거·국공유지 등).` : '',
           result.capped ? '한 번에 받을 수 있는 최대치라 일부가 빠졌을 수 있습니다. 확대해서 보세요.' : '',
         ]
           .filter(Boolean)
@@ -258,6 +272,7 @@
         zoningLayer = null;
       }
       zoningKinds = null;
+      zoningCount = 0;
     };
 
     if (!zoningEl.checked || map.getZoom() < ZONING_VIEW.minZoom) {
@@ -278,14 +293,21 @@
     clear();
     if (result && result.geojson) {
       zoningKinds = result.kinds;
+      zoningCount = result.geojson.features.length;
       zoningLayer = L.geoJSON(result.geojson, {
         style: (f) => ({ color: f.properties.color, weight: 1, fillColor: f.properties.color, fillOpacity: 0.3 }),
-        onEachFeature: (f, layer) => layer.bindPopup(`<b>${f.properties.zone}</b><br>${f.properties.group}`),
+        onEachFeature: (f, layer) =>
+          layer.bindPopup(
+            `<b>${f.properties.zone}</b><br>${f.properties.group}` +
+              '<br><small>용도지역은 토지이용계획확인원 기준입니다. 등기부·토지대장에는 나오지 않습니다.</small>'
+          ),
       }).addTo(map);
       // 필지가 위로 오도록 용도지역을 아래에 둔다.
       zoningLayer.bringToBack();
     } else if (result && result.failed) {
+      // 조용히 비어 있으면 앱이 고장난 것인지 자료가 없는 것인지 알 수 없다.
       zoningGuard.reset();
+      note(`용도지역을 받지 못했습니다: ${result.failed.join(' / ')}`, 'error');
     }
     renderLegend();
   }
