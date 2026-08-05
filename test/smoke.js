@@ -9,6 +9,8 @@
 
 const http = require('http');
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const { parseXml } = require('../lib/xml');
 const { classifyParking, extractCoordinates, normalizeRecords } = require('../lib/normalize');
@@ -355,6 +357,134 @@ test('반경 안의 표지만 거리순으로 남긴다', () => {
   assert.strictEqual(nearby.length, 2);
   assert.strictEqual(nearby[0].distance, 0);
   assert.ok(nearby[1].distance > 90 && nearby[1].distance < 120);
+});
+
+/* ------------------------------------------------ VWorld 공용 데이터 모듈 */
+
+/**
+ * public/vworld-data.js 는 브라우저용이라 window에 붙는다. 테스트에서는
+ * 최소한의 window/document 를 만들어 그 안에서 실행한다. 2D와 3D 화면이
+ * 이 모듈의 반환 모양에 의존하므로, 속성 이름이 바뀌면 여기서 걸린다.
+ */
+function loadVWorldData() {
+  const vm = require('vm');
+  const sandbox = {
+    document: { createElement: () => ({ remove() {} }), head: { appendChild() {} } },
+    performance: { now: () => 1 },
+    // 모듈이 인증도메인으로 현재 호스트를 쓴다.
+    location: { hostname: 'test.local' },
+    setTimeout,
+    clearTimeout,
+    URL,
+    console,
+  };
+  sandbox.window = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'public', 'vworld-data.js'), 'utf8'), sandbox);
+  return sandbox.window.VWorldData;
+}
+
+function fakeFeature(props) {
+  return {
+    type: 'Feature',
+    properties: props,
+    geometry: { type: 'Polygon', coordinates: [[[127.3, 36.5], [127.301, 36.5], [127.301, 36.501], [127.3, 36.5]]] },
+  };
+}
+
+test('공시지가 표기는 원/㎡와 평당을 함께 낸다', () => {
+  const api = loadVWorldData();
+  assert.strictEqual(api.formatPrice(240000), '240,000원/㎡ (평당 793,388원)');
+  assert.strictEqual(api.formatPrice(0), '공시지가 없음');
+  assert.strictEqual(api.formatPrice(null), '공시지가 없음');
+});
+
+test('공시지가 구간과 용도지역 갈래를 올바르게 나눈다', () => {
+  const api = loadVWorldData();
+  assert.strictEqual(api.priceStyle(32000).label, '5만원 미만');
+  assert.strictEqual(api.priceStyle(240000).label, '15~50만원');
+  assert.strictEqual(api.priceStyle(2100000).label, '150만원 이상');
+  assert.strictEqual(api.priceStyle(0).label, '값 없음');
+
+  assert.strictEqual(api.zoneStyle('일반공업지역').label, '공업지역');
+  assert.strictEqual(api.zoneStyle('제1종일반주거지역').label, '주거지역');
+  assert.strictEqual(api.zoneStyle('자연녹지지역').label, '녹지지역');
+  // 주거를 포함하는 준주거도 주거로 묶여야 한다.
+  assert.strictEqual(api.zoneStyle('준주거지역').label, '주거지역');
+  assert.strictEqual(api.zoneStyle('처음 보는 지정').label, '기타');
+});
+
+test('필지 조회가 화면이 쓰는 속성을 그대로 돌려준다', async () => {
+  const api = loadVWorldData();
+  const asked = [];
+  api.jsonp = async (url) => {
+    asked.push(new URL(url).searchParams.get('data'));
+    return {
+      response: {
+        result: {
+          featureCollection: {
+            features: [
+              fakeFeature({ jibun: '내판리 715', jiga: '240000', lndpcl_ar: '1500', jiga_year: '2025' }),
+              fakeFeature({ jibun: '내판리 716', jiga: '0', lndpcl_ar: '900', jiga_year: '2025' }),
+            ],
+          },
+        },
+      },
+    };
+  };
+
+  const result = await api.fetchParcels('KEY', { lat: 36.5, lng: 127.3 }, 500);
+  assert.strictEqual(asked[0], 'LP_PA_CBND_BUBUN');
+  assert.strictEqual(result.geojson.features.length, 2);
+  assert.strictEqual(result.priced, 1, '공시지가가 있는 필지만 세어야 한다');
+
+  const props = result.geojson.features[0].properties;
+  for (const key of ['color', 'price', 'jibun', 'area', 'year']) {
+    assert.ok(key in props, `화면이 쓰는 속성 ${key} 가 없다`);
+  }
+  assert.strictEqual(props.price, 240000);
+  assert.strictEqual(props.jibun, '내판리 715');
+  // 범례는 금액 순서여야 읽힌다.
+  assert.deepStrictEqual([...result.kinds.keys()], ['15~50만원', '값 없음']);
+});
+
+test('용도지역 조회가 화면이 쓰는 속성을 그대로 돌려준다', async () => {
+  const api = loadVWorldData();
+  api.jsonp = async () => ({
+    response: {
+      result: {
+        featureCollection: {
+          features: [fakeFeature({ dgm_nm: '일반공업지역' }), fakeFeature({ dgm_nm: '자연녹지지역' })],
+        },
+      },
+    },
+  });
+
+  const result = await api.fetchZoning('KEY', { lat: 36.5, lng: 127.3 }, 900);
+  const props = result.geojson.features[0].properties;
+  for (const key of ['color', 'zone', 'group']) {
+    assert.ok(key in props, `화면이 쓰는 속성 ${key} 가 없다`);
+  }
+  assert.strictEqual(props.zone, '일반공업지역');
+  assert.strictEqual(props.group, '공업지역');
+  assert.strictEqual(result.kinds.size, 2);
+});
+
+test('조회가 모두 실패하면 사유를 돌려준다', async () => {
+  const api = loadVWorldData();
+  api.jsonp = async () => {
+    throw new Error('응답 없음');
+  };
+  const result = await api.fetchParcels('KEY', { lat: 36.5, lng: 127.3 }, 500);
+  assert.strictEqual(result.geojson, undefined);
+  assert.ok(Array.isArray(result.failed) && result.failed.length >= 1);
+  assert.ok(result.failed[0].includes('응답 없음'));
+});
+
+test('인증키가 없으면 조회하지 않는다', async () => {
+  const api = loadVWorldData();
+  assert.strictEqual(await api.fetchParcels('', { lat: 36.5, lng: 127.3 }, 500), null);
+  assert.strictEqual(await api.fetchZoning('', { lat: 36.5, lng: 127.3 }, 900), null);
 });
 
 /* ---------------------------------------------------------------- 실행 */

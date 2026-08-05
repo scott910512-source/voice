@@ -1,15 +1,12 @@
 /* 자동 생성 파일. scripts/build-static.js 가 만든다. */
-<<<<<<< HEAD
-const VERSION = "62d81b86523d";
-=======
-const VERSION = "78c726911bd3";
->>>>>>> 1334c17 (필지 경계와 공시지가를 색으로 보여준다)
+const VERSION = "0b8b5382918e";
 const CACHE = 'sejong-map-' + VERSION;
 const ASSETS = [
   "./",
   "index.html",
   "style.css",
   "view2d.js",
+  "vworld-data.js",
   "sw-register.js",
   "data/signs.js",
   "manifest.webmanifest",

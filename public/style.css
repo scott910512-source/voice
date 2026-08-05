@@ -507,3 +507,50 @@ body {
   border-color: #2563eb;
   color: #fff;
 }
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.check input {
+  margin: 0;
+}
+
+.legend {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.legend__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+  align-items: center;
+}
+
+.legend__group b {
+  font-size: 11px;
+  color: var(--fg);
+  width: 100%;
+}
+
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend__item i {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  display: inline-block;
+}

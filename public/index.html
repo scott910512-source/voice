@@ -51,6 +51,14 @@
         </select>
       </section>
 
+      <section class="locate">
+        <label class="locate__label">겹쳐 보기</label>
+        <label class="check"><input id="parcels2d" type="checkbox" /> 필지 · 공시지가</label>
+        <label class="check"><input id="zoning2d" type="checkbox" /> 용도지역</label>
+      </section>
+
+      <p id="legend2d" class="legend" hidden></p>
+
       <p class="status" id="status"></p>
 
       <footer class="panel__footer">
@@ -65,6 +73,7 @@
 
     <script src="data/signs.js" onerror="void 0"></script>
     <script src="vendor/leaflet/leaflet.js"></script>
+    <script src="vworld-data.js"></script>
     <script src="view2d.js"></script>
     <script src="sw-register.js"></script>
   </body>

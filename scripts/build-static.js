@@ -97,6 +97,7 @@ function writeServiceWorker(version) {
     'index.html',
     'style.css',
     'view2d.js',
+    'vworld-data.js',
     'sw-register.js',
     'data/signs.js',
     'manifest.webmanifest',
