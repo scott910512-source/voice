@@ -481,6 +481,59 @@ test('조회가 모두 실패하면 사유를 돌려준다', async () => {
   assert.ok(result.failed[0].includes('응답 없음'));
 });
 
+test('후보 레이어를 동시에 던지고 먼저 성공한 것을 쓴다', async () => {
+  const api = loadVWorldData();
+  const asked = [];
+  api.jsonp = async (url) => {
+    const layer = new URL(url).searchParams.get('data');
+    asked.push(layer);
+    // 첫 후보가 틀린 이름인 상황. 순서대로 시도하면 여기서 제한 시간을 통째로 버린다.
+    if (layer !== 'LP_PA_CBND_BONBUN') throw new Error('없는 레이어');
+    return {
+      response: {
+        result: { featureCollection: { features: [fakeFeature({ jibun: '내판리 715', jiga: '240000' })] } },
+      },
+    };
+  };
+
+  const first = await api.fetchParcels('KEY', { lat: 36.5, lng: 127.3 }, 500);
+  assert.strictEqual(first.layer, 'LP_PA_CBND_BONBUN');
+  assert.strictEqual(asked.length, 2, '후보를 동시에 던져야 한다');
+
+  // 한 번 맞는 이름을 찾으면 기억한다. 지도를 움직일 때마다 후보를 다시
+  // 훑으면 요청 수가 후보 개수만큼 곱해진다.
+  asked.length = 0;
+  await api.fetchParcels('KEY', { lat: 36.51, lng: 127.3 }, 500);
+  assert.deepStrictEqual(asked, ['LP_PA_CBND_BONBUN']);
+});
+
+test('지도를 조금 움직인 정도로는 다시 받지 않는다', () => {
+  const api = loadVWorldData();
+  const guard = api.areaGuard();
+  const start = { lat: 36.5, lng: 127.3 };
+
+  const token = guard.claim(start, 500, false);
+  assert.ok(token, '처음에는 받아야 한다');
+
+  // 반경의 40% 안쪽(약 100m) 이동이면 이미 받아 둔 것으로 충분하다.
+  assert.strictEqual(guard.claim({ lat: 36.5009, lng: 127.3 }, 500, false), null);
+
+  // 그보다 멀리(약 330m) 가면 다시 받는다.
+  const moved = guard.claim({ lat: 36.503, lng: 127.3 }, 500, false);
+  assert.ok(moved && moved !== token);
+  // 그 사이 도착한 이전 응답은 버려야 한다.
+  assert.strictEqual(guard.fresh(token), false);
+  assert.strictEqual(guard.fresh(moved), true);
+
+  // 확대·축소로 반경이 바뀌어도 다시 받는다.
+  assert.ok(guard.claim({ lat: 36.503, lng: 127.3 }, 800, false));
+  // 레이어를 켜거나 주소로 이동했을 때는 같은 자리라도 다시 받는다.
+  assert.ok(guard.claim({ lat: 36.503, lng: 127.3 }, 800, true));
+  // 껐다 켜면 처음부터 다시 받는다.
+  guard.reset();
+  assert.ok(guard.claim({ lat: 36.503, lng: 127.3 }, 800, false));
+});
+
 test('인증키가 없으면 조회하지 않는다', async () => {
   const api = loadVWorldData();
   assert.strictEqual(await api.fetchParcels('', { lat: 36.5, lng: 127.3 }, 500), null);

@@ -26,6 +26,46 @@
     return [point.lng - dLng, point.lat - dLat, point.lng + dLng, point.lat + dLat];
   }
 
+  /** 두 좌표 사이 대략적인 거리(m). 몇백 m 범위를 재는 용도라 평면 근사로 충분하다. */
+  function distanceM(a, b) {
+    const dLat = (b.lat - a.lat) * 111000;
+    const dLng = (b.lng - a.lng) * 111000 * Math.cos((((a.lat + b.lat) / 2) * Math.PI) / 180);
+    return Math.sqrt(dLat * dLat + dLng * dLng);
+  }
+
+  /**
+   * 지도를 움직일 때마다 같은 자리를 다시 받지 않게 하고, 늦게 도착한 응답이
+   * 더 새로운 응답을 덮어쓰지 않게 한다.
+   *
+   * claim() 은 다시 받아야 하면 토큰을, 받을 필요가 없으면 null을 준다.
+   * 응답이 온 뒤 fresh(토큰) 이 false면 그 사이 지도가 더 움직인 것이므로 버린다.
+   */
+  function areaGuard(moveRatio) {
+    const ratio = typeof moveRatio === 'number' ? moveRatio : 0.4;
+    let at = null;
+    let radius = 0;
+    let seq = 0;
+
+    return {
+      claim(center, nextRadius, force) {
+        const near = at && nextRadius === radius && distanceM(at, center) <= radius * ratio;
+        if (near && !force) return null;
+        at = center;
+        radius = nextRadius;
+        return (seq += 1);
+      },
+      /** 레이어를 끄거나 실패했을 때. 다음 claim이 반드시 다시 받도록 되돌린다. */
+      reset() {
+        at = null;
+        radius = 0;
+        return (seq += 1);
+      },
+      fresh(token) {
+        return token === seq;
+      },
+    };
+  }
+
   /**
    * VWorld 데이터 API는 브라우저에서 부를 때 CORS 헤더가 없을 수 있어
    * JSONP(callback)로 받는다. 타일과 달리 fetch로는 막힐 수 있기 때문이다.
@@ -64,7 +104,78 @@
     });
   }
 
-  /** 성공하면 {geojson, labels, layer}, 지원하지 않으면 null. */
+  /* ------------------------------------------ 후보 레이어 동시 조회 */
+
+  /** 한 요청이 가져올 수 있는 최대 개수. VWorld 데이터 API의 상한이다. */
+  const FEATURE_LIMIT = 1000;
+  const TIMEOUT_MS = 10000;
+
+  /**
+   * 한 번 맞는 이름을 찾으면 기억한다. 지도를 움직일 때마다 후보를 처음부터
+   * 다시 던지면 요청 수가 후보 개수만큼 곱해진다.
+   */
+  const resolvedLayer = {};
+
+  function dataUrl(layer, vworldKey, bbox) {
+    const [minx, miny, maxx, maxy] = bbox;
+    return (
+      `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
+      `&size=${FEATURE_LIMIT}&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
+      `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(location.hostname || 'localhost')}`
+    );
+  }
+
+  /**
+   * 후보 레이어를 동시에 던지고 먼저 성공한 것을 쓴다.
+   *
+   * 순서대로 시도하면 틀린 이름 하나마다 제한 시간을 통째로 기다리게 되어,
+   * 결과가 나올 때까지 후보 개수만큼 시간이 곱해진다. 건물은 후보가 넷이라
+   * 최악의 경우 40초를 기다린 뒤에야 화면이 채워졌다.
+   *
+   * 성공하면 {layer, features}, 모두 실패하면 {failed: [사유]}.
+   */
+  function fetchFeatures(kind, candidates, vworldKey, point, radiusM) {
+    if (!vworldKey) return Promise.resolve(null);
+    const bbox = bboxAround(point, radiusM);
+    const order = resolvedLayer[kind] ? [resolvedLayer[kind]] : candidates;
+
+    return new Promise((resolve) => {
+      const tried = [];
+      let pending = order.length;
+      let settled = false;
+      let errored = false;
+
+      const fail = (layer, message, isError) => {
+        tried.push(`${layer}: ${message}`);
+        if (isError) errored = true;
+        pending -= 1;
+        if (settled || pending > 0) return;
+        settled = true;
+        // 이름이 틀렸거나 응답이 없었으면 기억해 둔 것을 지워 다음에 다시 훑게
+        // 한다. 다만 '결과 없음'은 그 자리에 자료가 없다는 뜻이라, 이름은
+        // 맞는 것이므로 그대로 둔다.
+        if (errored) delete resolvedLayer[kind];
+        resolve({ failed: tried });
+      };
+
+      for (const layer of order) {
+        window.VWorldData.jsonp(dataUrl(layer, vworldKey, bbox), TIMEOUT_MS).then((data) => {
+          const features = data?.response?.result?.featureCollection?.features;
+          if (!Array.isArray(features) || !features.length) {
+            // 자료가 없는 것인지 이름이 틀린 것인지는 응답 상태로 가른다.
+            const status = data?.response?.status;
+            fail(layer, '결과 없음', status !== 'OK' && status !== 'NOT_FOUND');
+            return;
+          }
+          if (settled) return;
+          settled = true;
+          resolvedLayer[kind] = layer;
+          resolve({ layer, features, capped: features.length >= FEATURE_LIMIT });
+        }, (error) => fail(layer, error.message, true));
+      }
+    });
+  }
+
   /* --------------------------------------------------------- 용도지역 */
 
   /**
@@ -95,42 +206,27 @@
   }
 
   async function fetchZoning(vworldKey, point, radiusM) {
-    if (!vworldKey) return null;
-    const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
-    const domain = location.hostname || 'localhost';
-    const tried = [];
+    const found = await fetchFeatures('zoning', VWORLD_ZONING_LAYERS, vworldKey, point, radiusM);
+    if (!found || !found.features) return found;
 
-    for (const layer of VWORLD_ZONING_LAYERS) {
-      const url =
-        `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
-        `&size=1000&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
-        `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(domain)}`;
-      try {
-        const data = await window.VWorldData.jsonp(url, 12000);
-        const features = data?.response?.result?.featureCollection?.features;
-        if (!Array.isArray(features) || !features.length) {
-          tried.push(`${layer}: 결과 없음`);
-          continue;
-        }
+    const kinds = new Map();
+    const out = found.features.map((feature) => {
+      const name = pickField(feature.properties || {}, ZONE_NAME_FIELDS);
+      const style = zoneStyle(name);
+      kinds.set(style.label, style.color);
+      return {
+        type: 'Feature',
+        properties: { zone: String(name || '용도 미상'), group: style.label, color: style.color },
+        geometry: feature.geometry,
+      };
+    });
 
-        const kinds = new Map();
-        const out = features.map((feature) => {
-          const name = pickField(feature.properties || {}, ZONE_NAME_FIELDS);
-          const style = zoneStyle(name);
-          kinds.set(style.label, style.color);
-          return {
-            type: 'Feature',
-            properties: { zone: String(name || '용도 미상'), group: style.label, color: style.color },
-            geometry: feature.geometry,
-          };
-        });
-
-        return { geojson: { type: 'FeatureCollection', features: out }, layer, kinds };
-      } catch (error) {
-        tried.push(`${layer}: ${error.message}`);
-      }
-    }
-    return { failed: tried };
+    return {
+      geojson: { type: 'FeatureCollection', features: out },
+      layer: found.layer,
+      capped: found.capped,
+      kinds,
+    };
   }
 
   /* ------------------------------------------------- 필지 · 공시지가 */
@@ -169,56 +265,42 @@
   }
 
   async function fetchParcels(vworldKey, point, radiusM) {
-    if (!vworldKey) return null;
-    const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
-    const domain = location.hostname || 'localhost';
-    const tried = [];
+    const found = await fetchFeatures('parcel', VWORLD_PARCEL_LAYERS, vworldKey, point, radiusM);
+    if (!found || !found.features) return found;
 
-    for (const layer of VWORLD_PARCEL_LAYERS) {
-      const url =
-        `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
-        `&size=1000&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
-        `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(domain)}`;
-      try {
-        const data = await window.VWorldData.jsonp(url, 12000);
-        const features = data?.response?.result?.featureCollection?.features;
-        if (!Array.isArray(features) || !features.length) {
-          tried.push(`${layer}: 결과 없음`);
-          continue;
-        }
+    const kinds = new Map();
+    let priced = 0;
+    const out = found.features.map((feature) => {
+      const props = feature.properties || {};
+      const price = Number(String(pickField(props, PRICE_FIELDS) ?? '').replace(/[^\d.]/g, ''));
+      const style = priceStyle(price);
+      if (Number.isFinite(price) && price > 0) priced += 1;
+      kinds.set(style.label, style.color);
+      return {
+        type: 'Feature',
+        properties: {
+          color: style.color,
+          price: Number.isFinite(price) ? price : 0,
+          jibun: String(pickField(props, JIBUN_FIELDS) ?? ''),
+          area: String(pickField(props, AREA_FIELDS) ?? ''),
+          year: String(pickField(props, YEAR_FIELDS) ?? ''),
+        },
+        geometry: feature.geometry,
+      };
+    });
 
-        const kinds = new Map();
-        let priced = 0;
-        const out = features.map((feature) => {
-          const props = feature.properties || {};
-          const price = Number(String(pickField(props, PRICE_FIELDS) ?? '').replace(/[^\d.]/g, ''));
-          const style = priceStyle(price);
-          if (Number.isFinite(price) && price > 0) priced += 1;
-          kinds.set(style.label, style.color);
-          return {
-            type: 'Feature',
-            properties: {
-              color: style.color,
-              price: Number.isFinite(price) ? price : 0,
-              jibun: String(pickField(props, JIBUN_FIELDS) ?? ''),
-              area: String(pickField(props, AREA_FIELDS) ?? ''),
-              year: String(pickField(props, YEAR_FIELDS) ?? ''),
-            },
-            geometry: feature.geometry,
-          };
-        });
+    // 범례는 금액 순서대로 보여야 읽힌다.
+    const ordered = new Map();
+    for (const b of PRICE_BREAKS) if (kinds.has(b.label)) ordered.set(b.label, b.color);
+    if (kinds.has('값 없음')) ordered.set('값 없음', '#cbd5e1');
 
-        // 범례는 금액 순서대로 보여야 읽힌다.
-        const ordered = new Map();
-        for (const b of PRICE_BREAKS) if (kinds.has(b.label)) ordered.set(b.label, b.color);
-        if (kinds.has('값 없음')) ordered.set('값 없음', '#cbd5e1');
-
-        return { geojson: { type: 'FeatureCollection', features: out }, layer, kinds: ordered, priced };
-      } catch (error) {
-        tried.push(`${layer}: ${error.message}`);
-      }
-    }
-    return { failed: tried };
+    return {
+      geojson: { type: 'FeatureCollection', features: out },
+      layer: found.layer,
+      capped: found.capped,
+      kinds: ordered,
+      priced,
+    };
   }
 
 
@@ -226,12 +308,16 @@
     // 건물 조회도 같은 헬퍼를 쓰므로 함께 내보낸다.
     jsonp,
     bboxAround,
+    distanceM,
+    areaGuard,
     pickField,
+    fetchFeatures,
     fetchZoning,
     fetchParcels,
     formatPrice,
     priceStyle,
     zoneStyle,
     PRICE_BREAKS,
+    FEATURE_LIMIT,
   };
 })();

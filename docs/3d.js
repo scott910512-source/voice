@@ -210,7 +210,26 @@
   const OVERPASS = 'https://overpass-api.de/api/interpreter';
 
   // 용도지역·필지·공시지가 조회는 2D 화면과 함께 쓰는 공용 모듈에 있다.
-  const { jsonp, bboxAround, pickField, fetchZoning, fetchParcels, formatPrice } = window.VWorldData;
+  const { pickField, fetchFeatures, fetchZoning, fetchParcels, formatPrice, areaGuard, distanceM } =
+    window.VWorldData;
+
+  /**
+   * 겹쳐 보기 조회 범위. 2D 화면과 같은 생각이다. 화면에 보이는 만큼만 받고,
+   * 너무 축소하면 아예 받지 않는다. 한 요청의 개수 상한 때문에 넓히면 일부만
+   * 잘려 오는데, 그 상태가 아무 표시가 없는 것보다 나쁘다.
+   */
+  const BUILDING_VIEW = { minZoom: 14, min: 400, max: 900 };
+  const PARCEL_VIEW = { minZoom: 15, min: 250, max: 1200 };
+  const ZONING_VIEW = { minZoom: 12, min: 400, max: 2500 };
+
+  /** 지도를 끌 때마다 조회하면 요청이 쏟아진다. 손을 뗀 뒤에 한 번만 받는다. */
+  function debounce(fn, ms) {
+    let timer = null;
+    return () => {
+      clearTimeout(timer);
+      timer = setTimeout(fn, ms);
+    };
+  }
 
   /* ------------------------------------------- VWorld 국가 건물 데이터 */
 
@@ -230,48 +249,28 @@
   const NAME_FIELDS = ['bldnm', 'buld_nm', 'bld_nm', 'bldg_nm', 'name', '건물명'];
 
   async function fetchVworldBuildings(point, radiusM) {
-    if (!vworldKey) return null;
-    const [minx, miny, maxx, maxy] = bboxAround(point, radiusM);
-    const domain = location.hostname || 'localhost';
-    const tried = [];
+    const found = await fetchFeatures('building', VWORLD_BUILDING_LAYERS, vworldKey, point, radiusM);
+    if (!found || !found.features) return found;
 
-    for (const layer of VWORLD_BUILDING_LAYERS) {
-      const url =
-        `https://api.vworld.kr/req/data?service=data&version=2.0&request=GetFeature&format=json` +
-        `&size=1000&page=1&data=${layer}&geomFilter=BOX(${minx},${miny},${maxx},${maxy})` +
-        `&key=${encodeURIComponent(vworldKey)}&domain=${encodeURIComponent(domain)}`;
-      try {
-        const data = await jsonp(url, 12000);
-        const features = data?.response?.result?.featureCollection?.features;
-        if (!Array.isArray(features) || !features.length) {
-          tried.push(`${layer}: 결과 없음`);
-          continue;
-        }
-
-        const labels = [];
-        const out = features.map((feature) => {
-          const props = feature.properties || {};
-          const floors = parseFloat(String(pickField(props, HEIGHT_FIELDS) ?? '').replace(/[^\d.]/g, ''));
-          // 층수로 오는 값이면 3m를 곱하고, 이미 미터면 그대로 쓴다.
-          const height = Number.isFinite(floors) && floors > 0 ? (floors < 200 ? floors * 3 : floors) : 6;
-          const name = pickField(props, NAME_FIELDS);
-          if (name) {
-            const c = centroidOf(feature.geometry);
-            if (c) labels.push({ name: String(name), lat: c.lat, lng: c.lng });
-          }
-          return { type: 'Feature', properties: { height }, geometry: feature.geometry };
-        });
-
-        return {
-          geojson: { type: 'FeatureCollection', features: out },
-          labels: sortNearest(labels, point, 60),
-          layer,
-        };
-      } catch (error) {
-        tried.push(`${layer}: ${error.message}`);
+    const labels = [];
+    const out = found.features.map((feature) => {
+      const props = feature.properties || {};
+      const floors = parseFloat(String(pickField(props, HEIGHT_FIELDS) ?? '').replace(/[^\d.]/g, ''));
+      // 층수로 오는 값이면 3m를 곱하고, 이미 미터면 그대로 쓴다.
+      const height = Number.isFinite(floors) && floors > 0 ? (floors < 200 ? floors * 3 : floors) : 6;
+      const name = pickField(props, NAME_FIELDS);
+      if (name) {
+        const c = centroidOf(feature.geometry);
+        if (c) labels.push({ name: String(name), lat: c.lat, lng: c.lng });
       }
-    }
-    return { failed: tried };
+      return { type: 'Feature', properties: { height }, geometry: feature.geometry };
+    });
+
+    return {
+      geojson: { type: 'FeatureCollection', features: out },
+      labels: sortNearest(labels, point, 60),
+      layer: found.layer,
+    };
   }
 
   function centroidOf(geometry) {
@@ -460,6 +459,9 @@
     let parcelKinds = null;
     let zoningKinds = null;
     let labelMarkers = [];
+    const buildingGuard = areaGuard();
+    const parcelGuard = areaGuard();
+    const zoningGuard = areaGuard();
 
     /**
      * 상호·건물명은 HTML 마커로 그린다.
@@ -508,20 +510,51 @@
       );
     }
 
-    async function loadParcels(at) {
-      if (!parcelsEl || !parcelsEl.checked) {
+    /** 보고 있는 화면을 덮는 반경. 기울여 보면 화면이 멀리까지 보여 상한을 둔다. */
+    function viewRadius(spec) {
+      const bounds = map.getBounds();
+      const half = distanceM(
+        { lat: bounds.getSouth(), lng: bounds.getWest() },
+        { lat: bounds.getNorth(), lng: bounds.getEast() }
+      ) / 2;
+      if (!Number.isFinite(half)) return spec.min;
+      return Math.round(Math.max(spec.min, Math.min(spec.max, half)));
+    }
+
+    function viewCenter() {
+      const center = map.getCenter();
+      return { lat: center.lat, lng: center.lng };
+    }
+
+    async function loadParcels(force) {
+      if (!parcelsEl || !parcelsEl.checked || map.getZoom() < PARCEL_VIEW.minZoom) {
+        parcelGuard.reset();
+        parcelGeoJson = null;
+        parcelKinds = null;
         addParcelLayer(null);
-        parcelNote = '';
+        parcelNote = parcelsEl && parcelsEl.checked ? '필지: 확대하면 표시됩니다' : '';
         renderAllLegends();
         return;
       }
-      const result = await fetchParcels(vworldKey, at, 500);
+
+      const at = viewCenter();
+      const radius = viewRadius(PARCEL_VIEW);
+      const token = parcelGuard.claim(at, radius, force);
+      if (!token) return;
+
+      const result = await fetchParcels(vworldKey, at, radius);
+      if (!parcelGuard.fresh(token)) return; // 그 사이 지도가 더 움직였다.
+
       if (result && result.geojson) {
         parcelGeoJson = result.geojson;
         addParcelLayer(parcelGeoJson);
         parcelKinds = result.kinds;
-        parcelNote = `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (${result.layer})`;
+        parcelNote =
+          `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 ` +
+          `(${result.layer}, 반경 ${radius}m)` +
+          (result.capped ? ' — 최대치라 일부 누락' : '');
       } else {
+        parcelGuard.reset();
         parcelGeoJson = null;
         parcelKinds = null;
         addParcelLayer(null);
@@ -611,20 +644,31 @@
       if (lines.length) setStatus(lines.join('\n'), 'ok');
     });
 
-    async function loadZoning(at) {
-      if (!zoningEl || !zoningEl.checked) {
+    async function loadZoning(force) {
+      if (!zoningEl || !zoningEl.checked || map.getZoom() < ZONING_VIEW.minZoom) {
+        zoningGuard.reset();
+        zoningGeoJson = null;
         addZoningLayer(null);
         renderLegend(null);
         zoningNote = '';
         return;
       }
-      const result = await fetchZoning(vworldKey, at, 900);
+
+      const at = viewCenter();
+      const radius = viewRadius(ZONING_VIEW);
+      const token = zoningGuard.claim(at, radius, force);
+      if (!token) return;
+
+      const result = await fetchZoning(vworldKey, at, radius);
+      if (!zoningGuard.fresh(token)) return;
+
       if (result && result.geojson) {
         zoningGeoJson = result.geojson;
         addZoningLayer(zoningGeoJson);
         renderLegend(result.kinds);
-        zoningNote = `용도지역 ${result.geojson.features.length}구역 (${result.layer})`;
+        zoningNote = `용도지역 ${result.geojson.features.length}구역 (${result.layer}, 반경 ${radius}m)`;
       } else {
+        zoningGuard.reset();
         zoningGeoJson = null;
         addZoningLayer(null);
         renderLegend(null);
@@ -652,12 +696,23 @@
     }
 
     let lastGeoJson = null;
+    let buildingRadius = BUILDING_VIEW.min;
 
-    async function loadBuildings(at) {
-      if (!buildingsEl || !buildingsEl.checked) {
+    async function loadBuildings(force) {
+      if (!buildingsEl || !buildingsEl.checked || map.getZoom() < BUILDING_VIEW.minZoom) {
+        buildingGuard.reset();
+        renderLabels([]);
         if (map.getLayer('buildings-3d')) map.removeLayer('buildings-3d');
+        lastGeoJson = null;
+        buildingCount = null;
         return;
       }
+
+      const at = viewCenter();
+      const radius = viewRadius(BUILDING_VIEW);
+      const token = buildingGuard.claim(at, radius, force);
+      if (!token) return;
+
       try {
         // 출처 선택. 국가 데이터는 전국을 덮고 층수가 정확하지만 연속지적도
         // 기반이라 항공사진과 어긋날 수 있다. OSM은 사진을 보고 그린 것이라
@@ -669,7 +724,7 @@
         let national = null;
         if (want !== 'osm') {
           setStatus('국가 건물 데이터를 받는 중…');
-          national = await fetchVworldBuildings(at, 700);
+          national = await fetchVworldBuildings(at, radius);
         }
 
         if (national && national.geojson) {
@@ -679,7 +734,7 @@
         } else {
           // 국가 데이터가 안 되면 OSM으로 내려간다.
           setStatus('건물·상호 데이터를 받는 중…');
-          const osm = await fetchBuildings(at, 700);
+          const osm = await fetchBuildings(at, radius);
           geojson = osm.geojson;
           labels = osm.labels;
           buildingSource = 'OpenStreetMap (항공사진과 잘 맞음)';
@@ -687,12 +742,17 @@
             want === 'osm' ? '' : national && national.failed ? national.failed.join(' / ') : '';
         }
 
+        // 그 사이 지도가 더 움직였으면 늦게 온 결과는 버린다.
+        if (!buildingGuard.fresh(token)) return;
+
         lastGeoJson = geojson;
+        buildingRadius = radius;
         buildingCount = geojson.features.length;
         if (buildingCount) addBuildingLayer(geojson);
         renderLabels(labels);
         describe(at);
       } catch (error) {
+        buildingGuard.reset();
         buildingCount = null;
         labelCount = null;
         setStatus(`건물 데이터를 받지 못했습니다.\n${error.message}`, 'error');
@@ -715,8 +775,8 @@
         zoningNote,
         parcelNote,
         `좌표: ${at.lat}, ${at.lng}`,
-        buildingCount === null ? '' : `건물: ${buildingCount}동 · 이름: ${labelCount || 0}개 (반경 700m)`,
-        '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다.',
+        buildingCount === null ? '' : `건물: ${buildingCount}동 · 이름: ${labelCount || 0}개 (반경 ${buildingRadius}m)`,
+        '드래그로 회전, 두 손가락(또는 Ctrl+드래그)으로 기울입니다. 지도를 옮기면 그 자리 기준으로 다시 받습니다.',
       ]);
     }
 
@@ -732,43 +792,56 @@
       });
     }
     if (buildingsEl) {
-      buildingsEl.addEventListener('change', () => loadBuildings(currentPoint));
+      buildingsEl.addEventListener('change', () => loadBuildings(true));
     }
     if (labelsEl) {
-      labelsEl.addEventListener('change', () => loadBuildings(currentPoint));
+      labelsEl.addEventListener('change', () => loadBuildings(true));
     }
     if (sourceEl) {
-      sourceEl.addEventListener('change', () => loadBuildings(currentPoint));
+      sourceEl.addEventListener('change', () => loadBuildings(true));
     }
     if (zoningEl) {
-      zoningEl.addEventListener('change', () => loadZoning(currentPoint));
+      zoningEl.addEventListener('change', () => loadZoning(true));
     }
     if (parcelsEl) {
-      parcelsEl.addEventListener('change', () => loadParcels(currentPoint));
+      parcelsEl.addEventListener('change', () => loadParcels(true));
     }
 
-    let currentPoint = point;
+    /** 2D로 넘어갈 때 지금 보고 있는 자리를 그대로 이어 간다. */
+    function syncTo2dLink() {
+      if (!to2dEl) return;
+      const center = viewCenter();
+      to2dEl.href = `./?at=${center.lat},${center.lng}&name=${encodeURIComponent(placeEl.value)}`;
+    }
+
+    // 지도를 옮기면 그 자리 기준으로 다시 받는다. 조금 움직인 정도는
+    // areaGuard 가 걸러 내므로 실제 요청은 화면이 꽤 바뀌었을 때만 나간다.
+    map.on(
+      'moveend',
+      debounce(() => {
+        syncTo2dLink();
+        loadBuildings(false);
+        loadZoning(false);
+        loadParcels(false);
+      }, 400)
+    );
 
     engine = {
       kind: 'maplibre',
       moveTo(next, nextTilt) {
-        currentPoint = next;
-        // 2D로 넘어갈 때 지금 보고 있는 위치를 그대로 이어 간다.
-        if (to2dEl) to2dEl.href = `./?at=${next.lat},${next.lng}&name=${encodeURIComponent(placeEl.value)}`;
         marker.setLngLat([next.lng, next.lat]);
         map.easeTo({ center: [next.lng, next.lat], pitch: pitchFrom(nextTilt), zoom: 16.5, duration: 800 });
-        loadBuildings(next);
-        loadZoning(next);
-        loadParcels(next);
+        // 이동이 끝나면 moveend 가 새 자리 기준으로 다시 받는다.
         return true;
       },
     };
 
     describe(point);
+    syncTo2dLink();
     map.once('load', () => {
-      loadParcels(point);
-      loadZoning(point);
-      loadBuildings(point);
+      loadParcels(true);
+      loadZoning(true);
+      loadBuildings(true);
     });
   }
 

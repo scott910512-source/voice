@@ -23,7 +23,18 @@
   const zoningEl = document.getElementById('zoning2d');
   const legendEl = document.getElementById('legend2d');
 
-  const { fetchParcels, fetchZoning, formatPrice } = window.VWorldData;
+  const { fetchParcels, fetchZoning, formatPrice, areaGuard } = window.VWorldData;
+
+  /**
+   * 겹쳐 보기 조회 범위.
+   *
+   * 화면에 보이는 만큼만 받는다. 한 요청이 가져올 수 있는 개수가 정해져 있어
+   * 무작정 넓히면 일부만 잘려 오는데, 그러면 "받아왔는데 반만 있는" 상태가
+   * 되어 아무 표시가 없는 것보다 나쁘다. 그래서 최대 반경을 두고, 그보다 더
+   * 멀리 축소하면 아예 받지 않고 확대하라고 알린다.
+   */
+  const PARCEL_VIEW = { minZoom: 15, min: 250, max: 1200, hint: '필지·공시지가는 지도를 더 확대하면 표시됩니다.' };
+  const ZONING_VIEW = { minZoom: 12, min: 400, max: 2500, hint: '용도지역은 지도를 더 확대하면 표시됩니다.' };
 
   /** 3D 화면과 같은 목록. 확장자가 레이어마다 다르다. */
   const VWORLD_LAYERS = {
@@ -47,7 +58,8 @@
   let zoningLayer = null;
   let parcelKinds = null;
   let zoningKinds = null;
-  let lastPoint = null;
+  const parcelGuard = areaGuard();
+  const zoningGuard = areaGuard();
 
   function tileUrl(kind) {
     const spec = VWORLD_LAYERS[kind] || VWORLD_LAYERS.base;
@@ -133,44 +145,100 @@
     return lines.join('<br>');
   }
 
-  async function loadParcels(point) {
-    if (parcelLayer) {
-      map.removeLayer(parcelLayer);
-      parcelLayer = null;
-    }
-    if (!parcelsEl.checked || !point) {
+  /** 보고 있는 화면을 덮는 반경. 반경 상자가 화면보다 조금 넓게 잡힌다. */
+  function viewRadius(spec) {
+    const bounds = map.getBounds();
+    const half = map.distance(bounds.getNorthEast(), bounds.getSouthWest()) / 2;
+    return Math.round(Math.max(spec.min, Math.min(spec.max, half)));
+  }
+
+  function viewCenter() {
+    const center = map.getCenter();
+    return { lat: center.lat, lng: center.lng };
+  }
+
+  function note(text, tone) {
+    statusEl.textContent = text;
+    if (tone) statusEl.dataset.tone = tone;
+    else delete statusEl.dataset.tone;
+  }
+
+  async function loadParcels(force) {
+    const clear = () => {
+      if (parcelLayer) {
+        map.removeLayer(parcelLayer);
+        parcelLayer = null;
+      }
       parcelKinds = null;
+    };
+
+    if (!parcelsEl.checked) {
+      parcelGuard.reset();
+      clear();
       renderLegend();
       return;
     }
-    statusEl.textContent = '필지·공시지가를 받는 중…';
-    const result = await fetchParcels(vworldKey, point, 500);
+    if (map.getZoom() < PARCEL_VIEW.minZoom) {
+      parcelGuard.reset();
+      clear();
+      renderLegend();
+      note(PARCEL_VIEW.hint);
+      return;
+    }
+
+    const center = viewCenter();
+    const radius = viewRadius(PARCEL_VIEW);
+    const token = parcelGuard.claim(center, radius, force);
+    if (!token) return; // 조금 움직인 정도라 이미 받아 둔 것으로 충분하다.
+
+    note('필지·공시지가를 받는 중…');
+    const result = await fetchParcels(vworldKey, center, radius);
+    // 응답을 기다리는 사이 지도가 더 움직였으면 늦은 결과는 버린다.
+    if (!parcelGuard.fresh(token)) return;
+
+    clear();
     if (result && result.geojson) {
       parcelKinds = result.kinds;
       parcelLayer = L.geoJSON(result.geojson, {
         style: (f) => ({ color: '#475569', weight: 0.6, fillColor: f.properties.color, fillOpacity: 0.55 }),
         onEachFeature: (f, layer) => layer.bindPopup(parcelPopup(f.properties)),
       }).addTo(map);
-      statusEl.textContent = `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개`;
-    } else {
-      parcelKinds = null;
-      statusEl.textContent = result && result.failed ? `필지를 받지 못했습니다: ${result.failed.join(' / ')}` : '';
-      if (result && result.failed) statusEl.dataset.tone = 'error';
+      note(
+        `필지 ${result.geojson.features.length}개 · 공시지가 있는 필지 ${result.priced}개 (반경 ${radius}m)` +
+          (result.capped ? '\n한 번에 받을 수 있는 최대치라 일부가 빠졌을 수 있습니다. 확대해서 보세요.' : '')
+      );
+    } else if (result && result.failed) {
+      parcelGuard.reset();
+      note(`필지를 받지 못했습니다: ${result.failed.join(' / ')}`, 'error');
     }
     renderLegend();
   }
 
-  async function loadZoning(point) {
-    if (zoningLayer) {
-      map.removeLayer(zoningLayer);
-      zoningLayer = null;
-    }
-    if (!zoningEl.checked || !point) {
+  async function loadZoning(force) {
+    const clear = () => {
+      if (zoningLayer) {
+        map.removeLayer(zoningLayer);
+        zoningLayer = null;
+      }
       zoningKinds = null;
+    };
+
+    if (!zoningEl.checked || map.getZoom() < ZONING_VIEW.minZoom) {
+      zoningGuard.reset();
+      clear();
       renderLegend();
       return;
     }
-    const result = await fetchZoning(vworldKey, point, 900);
+
+    const center = viewCenter();
+    const radius = viewRadius(ZONING_VIEW);
+    const token = zoningGuard.claim(center, radius, force);
+    if (!token) return;
+
+    const result = await fetchZoning(vworldKey, center, radius);
+    if (!zoningGuard.fresh(token)) return;
+
+    clear();
     if (result && result.geojson) {
       zoningKinds = result.kinds;
       zoningLayer = L.geoJSON(result.geojson, {
@@ -179,8 +247,8 @@
       }).addTo(map);
       // 필지가 위로 오도록 용도지역을 아래에 둔다.
       zoningLayer.bringToBack();
-    } else {
-      zoningKinds = null;
+    } else if (result && result.failed) {
+      zoningGuard.reset();
     }
     renderLegend();
   }
@@ -208,17 +276,21 @@
     return { lat: Number(found[0].lat), lng: Number(found[0].lon), label: found[0].display_name };
   }
 
+  /** 3D로 넘어갈 때 지금 보고 있는 자리를 그대로 이어 간다. */
+  function syncTo3dLink() {
+    const center = viewCenter();
+    to3dEl.href = `3d.html?at=${center.lat},${center.lng}&name=${encodeURIComponent(addressEl.value)}`;
+  }
+
   function show(point) {
     if (marker) marker.remove();
     marker = L.marker([point.lat, point.lng]).addTo(map);
     map.setView([point.lat, point.lng], 17);
     resultEl.textContent = `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
     statusEl.textContent = point.label;
-    // 3D로 넘어갈 때 지금 보고 있는 위치를 그대로 이어 간다.
-    to3dEl.href = `3d.html?at=${point.lat},${point.lng}&name=${encodeURIComponent(addressEl.value)}`;
-    lastPoint = point;
-    loadParcels(point);
-    loadZoning(point);
+    syncTo3dLink();
+    loadParcels(true);
+    loadZoning(true);
   }
 
   async function locate() {
@@ -237,10 +309,30 @@
     }
   }
 
+  /** 지도를 끌 때마다 조회하면 요청이 쏟아진다. 손을 뗀 뒤에 한 번만 받는다. */
+  function debounce(fn, ms) {
+    let timer = null;
+    return () => {
+      clearTimeout(timer);
+      timer = setTimeout(fn, ms);
+    };
+  }
+
   layerEl.addEventListener('change', () => setLayer(layerEl.value));
-  parcelsEl.addEventListener('change', () => loadParcels(lastPoint));
-  zoningEl.addEventListener('change', () => loadZoning(lastPoint));
+  parcelsEl.addEventListener('change', () => loadParcels(true));
+  zoningEl.addEventListener('change', () => loadZoning(true));
   locateEl.addEventListener('click', locate);
+
+  // 지도를 옮기면 그 자리 기준으로 다시 받는다. 조금 움직인 정도라면
+  // areaGuard 가 걸러 내므로 실제 요청은 화면이 꽤 바뀌었을 때만 나간다.
+  map.on(
+    'moveend',
+    debounce(() => {
+      syncTo3dLink();
+      loadParcels(false);
+      loadZoning(false);
+    }, 400)
+  );
   addressEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') locate();
   });
